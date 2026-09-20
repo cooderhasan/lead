@@ -5,6 +5,8 @@
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["postgresqlExtensions"]
+  /// Rust query engine yerine TS query compiler + @prisma/adapter-pg (Windows'ta binary indirme gerektirmez)
+  engineType      = "client"
 }
 
 datasource db {
