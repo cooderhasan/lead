@@ -35,6 +35,8 @@ const config = [
       "src/server/usage/**",
       "src/server/admin/**",
       "src/server/ai/usage-log.ts",
+      "src/server/knowledge/search.ts",
+      "src/app/api/health/**",
       "src/worker/**",
       "prisma/**",
       "tests/**",

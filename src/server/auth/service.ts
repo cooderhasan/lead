@@ -94,3 +94,8 @@ export async function authenticate(
   await audit({ userId: user.id, companyId: user.memberships[0]?.companyId, action: "auth.login", ip });
   return { userId: user.id, defaultCompanyId: user.memberships[0]?.companyId ?? null };
 }
+
+/** Kullanıcı tablosu tenant dışıdır: yalnızca tam e-posta eşleşmesiyle ID döner, listeleme yapılmaz. */
+export async function findUserIdByEmail(email: string): Promise<{ id: string } | null> {
+  return rawDb.user.findUnique({ where: { email: normalizeEmail(email) }, select: { id: true } });
+}

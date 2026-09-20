@@ -121,6 +121,8 @@ export function tenantDb(ctx: Pick<TenantContext, "companyId">) {
         async $allOperations({ model, operation, args, query }) {
           const m = model as Prisma.ModelName;
           const a = (args ?? {}) as AnyArgs;
+          // Argümanlar dinamik olarak genişletildiği için gevşek tipte çağrılır
+          const run = query as unknown as (args: unknown) => Promise<unknown>;
 
           if (FORBIDDEN_MODELS.has(m)) {
             throw new AppError("TENANT_VIOLATION", `${m} modeline tenant bağlamında erişilemez.`);
@@ -130,7 +132,7 @@ export function tenantDb(ctx: Pick<TenantContext, "companyId">) {
             if (!READ_OPS.has(operation)) {
               throw new AppError("TENANT_VIOLATION", `${m} global bir tablodur, değiştirilemez.`);
             }
-            return query(a);
+            return run(a);
           }
 
           if (m === "Company") {
@@ -138,7 +140,7 @@ export function tenantDb(ctx: Pick<TenantContext, "companyId">) {
               throw new AppError("TENANT_VIOLATION", `Company üzerinde '${operation}' yapılamaz.`);
             }
             if (operation === "update") assertNoCompanyChange(m, a.data, companyId);
-            return query({ ...a, where: { ...(a.where ?? {}), id: companyId } });
+            return run({ ...a, where: { ...(a.where ?? {}), id: companyId } });
           }
 
           if (!TENANT_MODELS.has(m)) {
@@ -147,13 +149,13 @@ export function tenantDb(ctx: Pick<TenantContext, "companyId">) {
 
           switch (operation) {
             case "create":
-              return query({ ...a, data: scopeData(m, a.data, companyId) });
+              return run({ ...a, data: scopeData(m, a.data, companyId) });
             case "createMany":
             case "createManyAndReturn":
-              return query({ ...a, data: scopeData(m, a.data, companyId) });
+              return run({ ...a, data: scopeData(m, a.data, companyId) });
             case "upsert":
               assertNoCompanyChange(m, a.update, companyId);
-              return query({
+              return run({
                 ...a,
                 where: { ...(a.where ?? {}), companyId },
                 create: scopeData(m, a.create, companyId) as Record<string, unknown>,
@@ -162,10 +164,10 @@ export function tenantDb(ctx: Pick<TenantContext, "companyId">) {
             case "updateMany":
             case "updateManyAndReturn":
               assertNoCompanyChange(m, a.data, companyId);
-              return query({ ...a, where: { ...(a.where ?? {}), companyId } });
+              return run({ ...a, where: { ...(a.where ?? {}), companyId } });
             default:
               // find*, count, aggregate, groupBy, delete, deleteMany
-              return query({ ...a, where: { ...(a.where ?? {}), companyId } });
+              return run({ ...a, where: { ...(a.where ?? {}), companyId } });
           }
         },
       },
