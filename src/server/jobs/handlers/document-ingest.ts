@@ -1,7 +1,7 @@
 import "server-only";
 import type { Prisma } from "@prisma/client";
 import { rawDb } from "@/server/db";
-import { ai } from "@/server/ai";
+import { ai, isAIConfigured } from "@/server/ai";
 import { untrusted } from "@/server/ai/guardrails";
 import {
   DOCUMENT_EXTRACTION_INSTRUCTIONS,
@@ -74,8 +74,10 @@ export const ingestDocumentJob: JobHandler<"document.ingest"> = async ({ documen
   await h.progress(60);
 
   // 4) AI ile ürün ve şirket bilgisi çıkarma → PENDING kayıtlar (kullanıcı onayı bekler)
-  let extracted = { products: 0, facts: 0 };
-  if (EXTRACTION_KINDS.has(doc.kind)) {
+  let extracted = { products: 0, facts: 0, aiSkipped: false };
+  if (EXTRACTION_KINDS.has(doc.kind) && !isAIConfigured()) {
+    extracted.aiSkipped = true;
+  } else if (EXTRACTION_KINDS.has(doc.kind)) {
     const { data } = await service.extract({
       schema: documentExtractionSchema,
       instructions: DOCUMENT_EXTRACTION_INSTRUCTIONS,
@@ -83,7 +85,7 @@ export const ingestDocumentJob: JobHandler<"document.ingest"> = async ({ documen
       input: untrusted(`document:${doc.title}`, text, 80_000),
       maxTokens: 8000,
     });
-    extracted = await persistExtraction(companyId, documentId, data, text);
+    extracted = { ...(await persistExtraction(companyId, documentId, data, text)), aiSkipped: false };
   }
 
   await rawDb.knowledgeDocument.update({

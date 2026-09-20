@@ -10,6 +10,7 @@ import { newStorageKey, storage } from "@/server/providers/storage";
 import { detectMimeType, looksLikePdf, MAX_UPLOAD_BYTES } from "@/server/knowledge/extract-text";
 import { searchKnowledge } from "@/server/knowledge/search";
 import { AppError } from "@/lib/errors";
+import { isAIConfigured } from "@/server/ai";
 
 export const DOCUMENT_KIND_LABELS: Record<DocumentKind, string> = {
   CATALOG: "Katalog",
@@ -43,18 +44,16 @@ export async function uploadDocument(
   if (!mimeType) throw new AppError("VALIDATION", "Desteklenen dosya türleri: PDF, TXT, MD, CSV.");
   if (mimeType === "application/pdf" && !looksLikePdf(file.bytes)) throw new AppError("VALIDATION", "Dosya geçerli bir PDF değil.");
 
-  const { usageId } = await consumeCredits({
-    companyId: ctx.companyId,
-    operation: "document.analyze",
-    userId: ctx.userId,
-    refType: "KnowledgeDocument",
-  });
+  // AI yoksa doküman yalnızca arama için indekslenir (ürün çıkarımı yapılmaz) ve kredi düşülmez
+  const usageId = isAIConfigured()
+    ? (await consumeCredits({ companyId: ctx.companyId, operation: "document.analyze", userId: ctx.userId, refType: "KnowledgeDocument" })).usageId
+    : undefined;
 
   const key = newStorageKey(ctx.companyId, "documents", file.name);
   try {
     await storage().put(key, file.bytes, mimeType);
   } catch (err) {
-    await refundCredits(usageId, "storage.failed");
+    if (usageId) await refundCredits(usageId, "storage.failed");
     console.error("[knowledge] depolama hatası", err);
     throw new AppError("VALIDATION", "Dosya kaydedilemedi. Lütfen tekrar deneyin.");
   }

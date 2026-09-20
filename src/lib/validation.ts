@@ -29,13 +29,27 @@ const optInt = z.preprocess(
   z.number().int().min(0).max(10_000_000).nullable().optional(),
 );
 
+/**
+ * Para/sayı girişini ayrıştırır. TR ("500.000,50", "50.000") ve EN ("500,000.50", "1250.5") biçimleri.
+ * Hem nokta hem virgül varsa sondaki ondalık ayracıdır; tek başına "1.234.567" / "50.000" binlik sayılır.
+ */
+export function parseMoney(input: string): number {
+  const s = input.trim().replace(/[\s₺$€]|TL/gi, "");
+  if (!s) return NaN;
+  const lastDot = s.lastIndexOf(".");
+  const lastComma = s.lastIndexOf(",");
+  if (lastDot !== -1 && lastComma !== -1) {
+    return lastComma > lastDot ? Number(s.replace(/\./g, "").replace(",", ".")) : Number(s.replace(/,/g, ""));
+  }
+  if (lastComma !== -1) return /,\d{1,2}$/.test(s) ? Number(s.replace(",", ".")) : Number(s.replace(/,/g, ""));
+  if (lastDot !== -1 && /^\d{1,3}(\.\d{3})+$/.test(s)) return Number(s.replace(/\./g, ""));
+  return Number(s);
+}
+
 const optMoney = z.preprocess(
   (v) => {
     if (v === "" || v === null || v === undefined) return null;
-    // "500.000,50" (TR) veya "500000.50" kabul
-    const s = String(v).trim().replace(/\s/g, "");
-    const normalized = /,\d{1,2}$/.test(s) ? s.replace(/\./g, "").replace(",", ".") : s.replace(/,/g, "");
-    return Number(normalized);
+    return parseMoney(String(v));
   },
   z.number().min(0).max(1e13).nullable().optional(),
 );

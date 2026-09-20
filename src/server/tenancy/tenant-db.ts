@@ -139,7 +139,13 @@ export function tenantDb(ctx: Pick<TenantContext, "companyId">) {
             if (!READ_OPS.has(operation) && operation !== "update") {
               throw new AppError("TENANT_VIOLATION", `Company üzerinde '${operation}' yapılamaz.`);
             }
-            if (operation === "update") assertNoCompanyChange(m, a.data, companyId);
+            if (operation === "update") {
+              const data = (a.data ?? {}) as Record<string, unknown>;
+              // Kredi bakiyesi yalnızca usage/credits.ts (atomik) üzerinden değişir
+              for (const k of ["id", "creditBalance", "slug"]) {
+                if (k in data) throw new AppError("TENANT_VIOLATION", `Company.${k} tenant bağlamında değiştirilemez.`);
+              }
+            }
             return run({ ...a, where: { ...(a.where ?? {}), id: companyId } });
           }
 

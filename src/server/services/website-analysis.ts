@@ -7,6 +7,7 @@ import { enqueue } from "@/server/jobs/queue";
 import { audit } from "@/server/audit/audit";
 import { normalizeUrl } from "@/server/web/ssrf";
 import { AppError } from "@/lib/errors";
+import { isAIConfigured } from "@/server/ai";
 
 /**
  * Kendi şirket sitesinin analizini başlatır. Kredi düşülür, iş kuyruğa alınır, hemen döner.
@@ -18,6 +19,10 @@ export async function startOwnWebsiteAnalysis(ctx: TenantContext, rawUrl: string
     url = normalizeUrl(rawUrl);
   } catch (err) {
     throw new AppError("VALIDATION", (err as Error).message, { website: (err as Error).message });
+  }
+
+  if (!isAIConfigured()) {
+    throw new AppError("AI_UNAVAILABLE", "AI sağlayıcısı yapılandırılmamış (.env → ANTHROPIC_API_KEY). Bu adımı atlayıp bilgileri elle girebilirsiniz.");
   }
 
   const db = tenantDb(ctx);

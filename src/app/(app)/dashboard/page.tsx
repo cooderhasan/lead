@@ -36,6 +36,12 @@ const ACTION_LABELS: Record<string, string> = {
   "memory.created": "Şirket hafızasına kural eklendi",
   "competitor.created": "Rakip eklendi",
   "member.added": "Ekibe kullanıcı eklendi",
+  "member.removed": "Ekipten kullanıcı çıkarıldı",
+  "seed.demo_company_created": "Demo şirket oluşturuldu",
+  "competitor.deleted": "Rakip silindi",
+  "memory.archived": "Kural arşivlendi",
+  "memory.activated": "Kural etkinleştirildi",
+  "knowledge.document.unverified": "Doküman satış kullanımından çıkarıldı",
 };
 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ welcome?: string }> }) {

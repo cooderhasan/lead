@@ -14,7 +14,7 @@ function createClient() {
   const adapter = new PrismaPg({ connectionString });
   return new PrismaClient({
     adapter,
-    log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
+    log: process.env.NODE_ENV === "test" ? [] : process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
   });
 }
 

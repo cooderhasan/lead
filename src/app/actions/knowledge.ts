@@ -7,6 +7,7 @@ import { requireTenant } from "@/server/tenancy/context";
 import { safeAction } from "@/server/actions/safe-action";
 import { deleteDocument, setDocumentVerified, uploadDocument } from "@/server/services/knowledge";
 import { AppError } from "@/lib/errors";
+import { isAIConfigured } from "@/server/ai";
 import type { ActionState } from "@/lib/action-state";
 
 const kinds = ["CATALOG", "PRODUCT_LIST", "PRICE_LIST", "TECHNICAL", "CERTIFICATE", "FAQ", "SALES_RULES", "CASE_STUDY", "OTHER"] as const;
@@ -20,7 +21,12 @@ export async function uploadDocumentAction(_: ActionState, fd: FormData): Promis
     const title = typeof fd.get("title") === "string" ? String(fd.get("title")) : undefined;
     await uploadDocument(ctx, { name: file.name, size: file.size, bytes: Buffer.from(await file.arrayBuffer()) }, { title, kind });
     revalidatePath("/knowledge");
-    return { ok: true, message: "Doküman yüklendi, işleniyor. Bitince ürünler ve bilgiler onayınıza sunulacak." };
+    return {
+      ok: true,
+      message: isAIConfigured()
+        ? "Doküman yüklendi, işleniyor. Bitince ürünler ve bilgiler onayınıza sunulacak."
+        : "Doküman arama için indeksleniyor. AI anahtarı tanımlı olmadığı için ürün çıkarımı yapılmayacak.",
+    };
   });
 }
 
