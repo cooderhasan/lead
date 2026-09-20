@@ -7,7 +7,9 @@ const optionalString = z.preprocess(emptyToUndefined, z.string().optional());
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   DATABASE_URL: z.string().min(1, "DATABASE_URL tanımlı değil"),
-  APP_URL: z.string().url().default("http://localhost:3000"),
+  APP_URL: z.preprocess(emptyToUndefined, z.string().url().default("http://localhost:3000")),
+  /** false → /register kapalı (herkese açık demo sunucusunda AI kredisini korumak için) */
+  ALLOW_SIGNUP: z.preprocess(emptyToUndefined, z.enum(["true", "false"]).default("true")).transform((v) => v === "true"),
   ENCRYPTION_KEY: optionalString,
   SIGNUP_CREDITS: z.coerce.number().int().min(0).default(500),
 

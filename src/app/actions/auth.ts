@@ -8,9 +8,12 @@ import { switchCompany } from "@/server/tenancy/context";
 import { parseForm, safeAction } from "@/server/actions/safe-action";
 import { loginSchema, registerSchema } from "@/lib/validation";
 import type { ActionState } from "@/lib/action-state";
+import { AppError } from "@/lib/errors";
+import { env } from "@/server/env";
 
 export async function registerAction(_: ActionState, fd: FormData): Promise<ActionState> {
   const result = await safeAction(async () => {
+    if (!env().ALLOW_SIGNUP) throw new AppError("FORBIDDEN", "Yeni kayıtlar şu an kapalı.");
     const input = parseForm(registerSchema, fd);
     const { userId, companyId } = await registerUser(input);
     await createSession(userId, companyId);
