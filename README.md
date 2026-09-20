@@ -23,7 +23,7 @@ npm install
 copy .env.example .env
 #   .env içinde ANTHROPIC_API_KEY değerini doldurun (AI olmadan da çalışır; analiz adımları devre dışı kalır)
 
-# 3) Veritabanı (Postgres + pgvector, Redis, MinIO)
+# 3) Veritabanı (Postgres + pgvector, Redis)
 docker compose up -d
 
 # 4) Tablolar + demo verisi

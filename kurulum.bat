@@ -42,19 +42,17 @@ echo        Git ve Docker - tamam
 echo.
 
 echo [2/7] Git gecmisi hazirlaniyor...
-if exist ".git" (
-  echo        Git zaten hazir, atlaniyor.
-) else (
-  if exist "ai-sales-os.bundle" (
+if exist "ai-sales-os.bundle" (
+  if not exist ".git" (
     git init -q -b main
-    git fetch -q ai-sales-os.bundle main
-    git reset -q --hard FETCH_HEAD
     git remote add origin https://github.com/cooderhasan/lead.git
-    del ai-sales-os.bundle
-    echo        Tamam.
-  ) else (
-    echo        Bundle dosyasi yok, atlaniyor.
   )
+  git fetch -q ai-sales-os.bundle main
+  git reset -q --hard FETCH_HEAD
+  del ai-sales-os.bundle
+  echo        Tamam.
+) else (
+  echo        Guncel, atlaniyor.
 )
 echo.
 
@@ -73,7 +71,7 @@ if exist ".env" (
 echo.
 
 echo [5/7] Veritabani baslatiliyor (Docker)...
-docker compose up -d
+docker compose up -d postgres redis
 if errorlevel 1 goto :hata
 echo        Veritabaninin hazir olmasi bekleniyor...
 set /a tries=0

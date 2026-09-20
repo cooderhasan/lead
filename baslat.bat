@@ -8,7 +8,7 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-docker compose up -d
+docker compose up -d postgres redis
 echo.
 echo Uygulama baslatiliyor... Tarayici birkac saniye icinde acilacak.
 echo Kapatmak icin bu pencerede Ctrl+C yapin.
