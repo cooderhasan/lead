@@ -4,6 +4,8 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: { default: "AI Sales OS", template: "%s · AI Sales OS" },
   description: "Siz ürününüzü anlatın. Müşteriyi AI bulsun.",
+  // Uygulama giriş gerektirir; arama motorlarında listelenmesin
+  robots: { index: false, follow: false },
 };
 
 export const viewport: Viewport = {

@@ -11,7 +11,11 @@ Planlar: [Mimari](docs/01-MIMARI-PLAN.md) · [Veritabanı](docs/02-VERITABANI-PL
 
 ---
 
-## Kurulum (Windows)
+## Sunucuya kurulum (Coolify)
+
+Bkz. **[COOLIFY.md](COOLIFY.md)** — `lead.aktifyay.com.tr` için adım adım.
+
+## Yerel kurulum (Windows)
 
 Gerekenler: **Node.js 20.9+** (22 önerilir), **Docker Desktop** (Postgres + Redis için), Git.
 
