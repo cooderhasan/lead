@@ -68,6 +68,8 @@ if exist ".env" (
   copy /y ".env.example" ".env" >nul
   echo        .env olusturuldu.
 )
+rem Veritabani portu 5433 (eski .env dosyalarini da duzelt)
+powershell -NoProfile -Command "$p='.env'; $t=[IO.File]::ReadAllText($p); if ($t.Contains('localhost:5432/')) { [IO.File]::WriteAllText($p, $t.Replace('localhost:5432/','localhost:5433/')); Write-Host '       Veritabani portu 5433 olarak guncellendi.' }"
 echo.
 
 echo [5/7] Veritabani baslatiliyor (Docker)...
