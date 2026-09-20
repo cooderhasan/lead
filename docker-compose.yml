@@ -11,7 +11,7 @@ services:
       POSTGRES_USER: salesos
       POSTGRES_PASSWORD: salesos
       POSTGRES_DB: salesos
-    ports: ["5432:5432"]
+    ports: ["5433:5432"]  # 5432 başka bir Postgres ile çakışmasın diye
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./docker/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
