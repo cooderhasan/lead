@@ -25,7 +25,10 @@ const PRICES: Array<[prefix: string, input: number, output: number]> = [
 const DEFAULT_PRICE: [number, number] = [3, 15];
 
 export function estimateCostUsd(model: string, inputTokens: number, outputTokens: number): number {
-  const match = PRICES.filter(([p]) => model.startsWith(p)).sort((a, b) => b[0].length - a[0].length)[0];
+  // OpenRouter vb.: "anthropic/claude-sonnet-4.5", "meta-llama/…:free" → sağlayıcı öneki atılır, ":free" ücretsizdir
+  if (/:free$/i.test(model)) return 0;
+  const name = model.includes("/") ? model.slice(model.lastIndexOf("/") + 1) : model;
+  const match = PRICES.filter(([p]) => name.startsWith(p)).sort((a, b) => b[0].length - a[0].length)[0];
   const [inPrice, outPrice] = match ? [match[1], match[2]] : DEFAULT_PRICE;
   return (inputTokens * inPrice + outputTokens * outPrice) / 1_000_000;
 }

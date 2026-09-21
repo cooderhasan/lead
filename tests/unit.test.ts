@@ -243,3 +243,13 @@ describe("AI hata açıklaması", () => {
     expect(describeProviderError(new AIProviderError("anthropic bağlantı hatası: fetch failed", "anthropic", undefined, true))).toMatch(/ulaşılamıyor/);
   });
 });
+
+describe("AI maliyet tahmini (OpenRouter adları)", () => {
+  it("sağlayıcı önekini tanır, ücretsiz modeli 0 sayar", async () => {
+    const { estimateCostUsd } = await import("@/server/ai/pricing");
+    expect(estimateCostUsd("anthropic/claude-haiku-4.5", 1_000_000, 0)).toBe(1);
+    expect(estimateCostUsd("anthropic/claude-sonnet-4.5", 1_000_000, 0)).toBe(3);
+    expect(estimateCostUsd("meta-llama/llama-3.3-70b-instruct:free", 1_000_000, 1_000_000)).toBe(0);
+    expect(estimateCostUsd("claude-haiku-4-5-20251001", 1_000_000, 0)).toBe(1);
+  });
+});
