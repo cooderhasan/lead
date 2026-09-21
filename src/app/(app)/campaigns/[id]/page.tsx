@@ -145,7 +145,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
                     {strategy.sequence.map((s, i) => (
                       <li key={i}>
                         Gün {s.dayOffset}: {s.name}
-                        {i > 0 && <span className="text-xs text-text-3"> (hatırlatmalar Faz 4&apos;te)</span>}
+                        {i > 0 && <span className="text-xs text-text-3"> (yanıt gelmezse AI hatırlatma taslağı hazırlar, siz onaylarsınız)</span>}
                       </li>
                     ))}
                   </ol>

@@ -322,7 +322,10 @@ describe("kampanya akışı", () => {
     const after = await rawDb.message.findUniqueOrThrow({ where: { id: msgs[0]!.id } });
     expect(after).toMatchObject({ status: "SENT", provider: "fake", providerMessageId: `p-${msgs[0]!.id}` });
     expect((await rawDb.lead.findUniqueOrThrow({ where: { id: okLead } })).status).toBe("CONTACTED");
-    expect((await rawDb.campaign.findUniqueOrThrow({ where: { id: campaign.id } })).status).toBe("COMPLETED");
+    // Stratejide 2. adım (gün 7) var: hatırlatma planlandı, kampanya tamamlanmadı, "hazır" bekliyor
+    expect((await rawDb.campaign.findUniqueOrThrow({ where: { id: campaign.id } })).status).toBe("READY");
+    const followUp = await rawDb.followUp.findFirstOrThrow({ where: { leadId: okLead } });
+    expect(followUp).toMatchObject({ status: "SCHEDULED", campaignId: campaign.id });
 
     // Aynı adrese 3 gün içinde tekrar gönderilmez (frekans sınırı)
     const { best } = await refreshLeadCompliance(a.companyId, okLead);
@@ -379,6 +382,9 @@ describe("kampanya akışı", () => {
     expect(email.sent.map((e) => e.to)).toEqual(["info@diger.com"]);
     expect((await rawDb.message.findUniqueOrThrow({ where: { id: target.id } })).status).toBe("CANCELLED");
 
+    // Planlı hatırlatmalar sürdüğü için kampanya duraklatılabilir; duraklatınca hatırlatmalar bekler
+    await pauseCampaign(a, campaign.id);
+    expect((await rawDb.campaign.findUniqueOrThrow({ where: { id: campaign.id } })).status).toBe("PAUSED");
     await expect(pauseCampaign(a, campaign.id)).rejects.toThrow(/aktif gönderim yok/);
   });
 

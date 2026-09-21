@@ -4,6 +4,7 @@ import { ArrowRight, Check, Megaphone, Sparkles } from "lucide-react";
 import { requireTenantPage } from "@/server/tenancy/context";
 import { getCompanyOverview, profileCompleteness } from "@/server/services/company";
 import { getFunnelThisMonth, getRecentActivity } from "@/server/services/dashboard";
+import { getTodayAgenda } from "@/server/services/crm";
 import { Alert, Badge, Card, CardBody, CardHeader, LinkButton, PageHeader } from "@/components/ui";
 import { cn, formatDateTime, formatNumber } from "@/lib/cn";
 
@@ -42,21 +43,57 @@ const ACTION_LABELS: Record<string, string> = {
   "memory.archived": "Kural arşivlendi",
   "memory.activated": "Kural etkinleştirildi",
   "knowledge.document.unverified": "Doküman satış kullanımından çıkarıldı",
+  // Faz 2 — lead
+  "lead.discovered": "Lead'ler kaydedildi",
+  "lead.search.started": "Lead araması başlatıldı",
+  "lead.search.completed": "Lead araması tamamlandı",
+  "lead.csv_imported": "CSV'den lead aktarıldı",
+  "lead.created_manual": "Lead eklendi",
+  "lead.research.started": "Lead araştırması başlatıldı",
+  "lead.research.completed": "Lead araştırıldı ve puanlandı",
+  "lead.scoring.started": "Lead puanlaması başlatıldı",
+  "lead.scoring.completed": "Lead'ler puanlandı",
+  "lead.status_changed": "Lead durumu değişti",
+  "lead.deleted": "Lead silindi",
+  // Faz 3 — kampanya ve gönderim
+  "campaign.created": "Kampanya oluşturuldu",
+  "campaign.strategy_generated": "AI kampanya stratejisi hazırladı",
+  "campaign.strategy_approved": "Kampanya stratejisi onaylandı",
+  "campaign.messages_generated": "AI kampanya mesajlarını yazdı",
+  "campaign.approved": "Kampanya onaylandı",
+  "campaign.sending_started": "Gönderim başlatıldı",
+  "campaign.send_batch": "İletiler gönderildi",
+  "campaign.paused": "Kampanya duraklatıldı",
+  "campaign.send_failed": "Gönderim durdu",
+  "message.approved": "Mesajlar onaylandı",
+  "message.edited": "Mesaj düzenlendi",
+  "suppression.added": "Engel listesine eklendi",
+  "email.bounced": "E-posta geri döndü",
+  "email.complaint": "Spam şikâyeti alındı",
+  "compliance.reviewed": "Gönderim uygunluğu incelendi",
+  // Faz 4 — yanıtlar ve CRM
+  "conversation.reply_received": "Yanıt geldi",
+  "conversation.reply_drafted": "AI yanıt taslağı hazırladı",
+  "followup.processed": "Hatırlatma taslakları hazırlandı",
+  "opportunity.created": "Fırsat oluşturuldu",
+  "opportunity.stage_changed": "Fırsat aşaması değişti",
+  "task.completed": "Görev tamamlandı",
 };
 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ welcome?: string }> }) {
   const ctx = await requireTenantPage();
-  const [{ welcome }, overview, funnel, activity] = await Promise.all([
+  const [{ welcome }, overview, funnel, activity, agenda] = await Promise.all([
     searchParams,
     getCompanyOverview(ctx),
     getFunnelThisMonth(ctx),
     getRecentActivity(ctx),
+    getTodayAgenda(ctx),
   ]);
   const completeness = profileCompleteness(overview);
   const hasPipelineData = funnel.some((f) => f.value > 0);
 
   // "AI önerisi" — yalnızca gerçek duruma dayalı, veri yoksa uydurmaz
-  const suggestions: Array<{ text: string; href: string }> = [];
+  const suggestions: Array<{ text: string; href: string; tone?: "danger" | "warning" | "accent" }> = agenda.map((a) => ({ text: a.text, href: a.href, tone: a.tone }));
   if (overview.pendingFacts > 0) suggestions.push({ text: `${overview.pendingFacts} AI bulgusu onayınızı bekliyor. Onaylanmayan bilgiler satış mesajlarında kullanılmaz.`, href: "/company" });
   if (overview.company.profile?.aiSummaryStatus !== "VERIFIED" && overview.company.profile?.aiSummary) suggestions.push({ text: "\"Firmayı böyle anladım\" özetini onaylayın.", href: "/company" });
   if (overview.products === 0) suggestions.push({ text: "En az bir ürün ekleyin — AI hangi lead'e hangi ürünü önereceğini buna göre belirler.", href: "/products/new" });
@@ -85,7 +122,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       <Card className="mb-6">
         <CardHeader
           title="Bu ay"
-          description={hasPipelineData ? "Satış hunisi" : "Lead bulma (Faz 2) ve kampanyalar (Faz 3) açıldığında bu sayılar dolmaya başlar."}
+          description={hasPipelineData ? "Satış hunisi" : "Lead bulup kampanya gönderdikçe bu sayılar dolmaya başlar."}
         />
         <CardBody className="grid grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-4 lg:grid-cols-7">
           {funnel.map((f, i) => (
@@ -106,22 +143,29 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           <CardHeader
             title={
               <span className="inline-flex items-center gap-1.5">
-                <Sparkles className="size-4 text-accent" aria-hidden /> AI önerisi
+                <Sparkles className="size-4 text-accent" aria-hidden /> Bugün ne yapmalıyım?
               </span>
             }
-            description="Şu anki duruma göre sıradaki en faydalı adımlar"
+            description="Gerçek kayıtlarınıza göre öncelik sırasıyla"
           />
           <CardBody>
             {suggestions.length === 0 ? (
               <p className="text-sm text-text-2">
-                Şirket profiliniz hazır. Lead bulma modülü (Faz 2) açıldığında AI burada haftalık iş önerileri sunacak.
+                Bekleyen iş yok. Yeni müşteri bulmak için Leads ekranından arama yapın veya yüksek puanlı lead&apos;lerle kampanya oluşturun.
               </p>
             ) : (
               <ol className="flex flex-col gap-2">
                 {suggestions.map((s, i) => (
                   <li key={s.text}>
                     <Link href={s.href} className="group flex items-start gap-3 rounded-lg p-2 hover:bg-surface-2">
-                      <span className="grid size-6 shrink-0 place-items-center rounded-full bg-accent-soft text-xs font-semibold text-accent-text">{i + 1}</span>
+                      <span
+                        className={cn(
+                          "grid size-6 shrink-0 place-items-center rounded-full text-xs font-semibold",
+                          s.tone === "danger" ? "bg-danger-soft text-danger" : s.tone === "warning" ? "bg-warning-soft text-warning" : "bg-accent-soft text-accent-text",
+                        )}
+                      >
+                        {i + 1}
+                      </span>
                       <span className="flex-1 text-sm text-text">{s.text}</span>
                       <ArrowRight className="mt-0.5 size-4 text-text-3 group-hover:text-accent" aria-hidden />
                     </Link>

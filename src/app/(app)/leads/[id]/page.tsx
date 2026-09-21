@@ -15,7 +15,14 @@ import { LEAD_STATUSES } from "@/lib/validation";
 import { SCORE_LABELS, SCORE_MAX, scoreTone, type ScoreKey } from "@/lib/lead-scoring";
 import { listLeadCompliance, refreshLeadCompliance } from "@/server/services/compliance";
 import { BASIS_LABELS, COMPLIANCE_LABELS } from "@/lib/compliance";
-import { ComplianceReviewForm, ResearchLeadButton, ScoreLeadsButton } from "../lead-forms";
+import { listConversations, REPLY_CATEGORY_LABELS } from "@/server/services/conversations";
+import { FOLLOWUP_STATUS_LABELS, listFollowUps } from "@/server/services/followups";
+import { cancelFollowUpAction } from "@/app/actions/conversations";
+import { createOpportunityAction } from "@/app/actions/crm";
+import { getLeadCrm, STAGE_LABELS } from "@/server/services/crm";
+import { ActionButton } from "@/components/action-button";
+import { formatMoney } from "@/lib/cn";
+import { ComplianceReviewForm, ManualReplyForm, ResearchLeadButton, ScoreLeadsButton } from "../lead-forms";
 
 export const metadata: Metadata = { title: "Lead" };
 
@@ -74,10 +81,13 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   }
   // Uyum kayıtlarını güncel tut (adres / engel listesi değişmiş olabilir); ucuz, AI kullanmaz
   if (can(ctx, "lead.write")) await refreshLeadCompliance(ctx.companyId, id);
-  const [activeJob, lastError, compliance] = await Promise.all([
+  const [activeJob, lastError, compliance, conversations, followUps, crm] = await Promise.all([
     getActiveLeadJob(ctx, id),
     getLastLeadJobError(ctx, id),
     listLeadCompliance(ctx, id),
+    listConversations(ctx, { leadId: id }),
+    listFollowUps(ctx, { leadId: id }),
+    getLeadCrm(ctx, id),
   ]);
   const canReview = can(ctx, "compliance.review");
   const canWrite = can(ctx, "lead.write");
@@ -290,6 +300,55 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               </ol>
             )}
           </Card>
+
+          {/* Yanıtlar ve hatırlatmalar */}
+          <Card>
+            <CardHeader title="Yanıtlar" description="Gelen yanıtlar AI ile sınıflandırılır; ilgi, teklif veya görüşme talebinde görev ve fırsat açılır." />
+            {conversations.length > 0 && (
+              <ul className="divide-y divide-border">
+                {conversations.map((c) => (
+                  <li key={c.id}>
+                    <Link href={`/messages/c/${c.id}`} className="flex items-center gap-3 px-5 py-3 text-sm hover:bg-surface-2">
+                      <span className="min-w-0 flex-1 truncate text-text-2">{c.messages[0]?.aiSummary ?? c.messages[0]?.body.slice(0, 140)}</span>
+                      {c.category ? <Badge tone="accent">{REPLY_CATEGORY_LABELS[c.category]}</Badge> : <Badge>Sınıflandırılıyor</Badge>}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {canWrite && (
+              <CardBody className="border-t border-border">
+                <details>
+                  <summary className="cursor-pointer text-sm font-medium text-text">Posta kutunuza gelen bir yanıtı elle ekleyin</summary>
+                  <div className="mt-3">
+                    <ManualReplyForm leadId={lead.id} defaultFrom={compliance[0]?.address ?? lead.genericEmail ?? ""} />
+                  </div>
+                </details>
+              </CardBody>
+            )}
+            {followUps.length > 0 && (
+              <CardBody className="border-t border-border">
+                <p className="mb-2 text-xs font-medium text-text-2">Hatırlatmalar</p>
+                <ul className="space-y-1.5 text-sm">
+                  {followUps.map((f) => (
+                    <li key={f.id} className="flex flex-wrap items-center gap-2">
+                      <span className="text-text">{f.campaignStep?.name ?? "Hatırlatma"}</span>
+                      <span className="text-xs text-text-3">{fmtDate(f.scheduledAt)}</span>
+                      <Badge tone={f.status === "SCHEDULED" ? "accent" : f.status === "SENT" ? "success" : "neutral"}>{FOLLOWUP_STATUS_LABELS[f.status]}</Badge>
+                      {f.skipReason && <span className="text-xs text-text-3">{f.skipReason}</span>}
+                      {canWrite && f.status === "SCHEDULED" && (
+                        <form action={cancelFollowUpAction} className="ml-auto">
+                          <input type="hidden" name="id" value={f.id} />
+                          <input type="hidden" name="leadId" value={lead.id} />
+                          <Button type="submit" variant="ghost" size="sm">İptal</Button>
+                        </form>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </CardBody>
+            )}
+          </Card>
         </div>
 
         {/* Yan panel */}
@@ -320,6 +379,41 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                   </>
                 )}
               </dl>
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Fırsat ve görevler"
+              action={crm.opportunity ? <Link href="/pipeline" className="text-xs text-accent">Pipeline</Link> : undefined}
+            />
+            <CardBody className="flex flex-col gap-3 text-sm">
+              {crm.opportunity ? (
+                <p>
+                  <Badge tone={crm.opportunity.stage === "WON" ? "success" : crm.opportunity.stage === "LOST" ? "danger" : "accent"}>
+                    {STAGE_LABELS[crm.opportunity.stage]}
+                  </Badge>
+                  <span className="ml-2 text-text-2">{crm.opportunity.value ? formatMoney(Number(crm.opportunity.value)) : "Tutar girilmedi"}</span>
+                </p>
+              ) : canWrite ? (
+                <ActionButton action={createOpportunityAction} fields={{ leadId: lead.id }} variant="secondary">
+                  Fırsat oluştur
+                </ActionButton>
+              ) : (
+                <p className="text-text-3">Fırsat yok.</p>
+              )}
+              {crm.tasks.length > 0 && (
+                <ul className="space-y-1">
+                  {crm.tasks.map((t) => (
+                    <li key={t.id} className="flex items-start gap-2">
+                      <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-accent" aria-hidden />
+                      <span className="text-text">{t.title}</span>
+                      {t.dueAt && <span className="ml-auto shrink-0 text-xs text-text-3">{fmtDate(t.dueAt)}</span>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <Link href="/tasks" className="text-xs text-accent">Tüm görevler</Link>
             </CardBody>
           </Card>
 

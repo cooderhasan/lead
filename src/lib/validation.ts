@@ -219,6 +219,38 @@ export const campaignCreateSchema = z.object({
   maxLeads: z.preprocess((v) => (v === "" || v == null ? undefined : Number(v)), z.number().int().min(1).max(500).optional()),
 });
 
+export const manualReplySchema = z.object({
+  leadId: z.string().min(1),
+  fromAddress: z.string().trim().toLowerCase().email("Yanıtı gönderen adresi girin").max(200),
+  subject: optText(300),
+  body: z.string().trim().min(2, "Yanıt metnini yapıştırın").max(50_000),
+});
+
+const OPP_STAGES = ["NEW", "QUALIFIED", "CONTACTED", "INTERESTED", "QUOTE", "NEGOTIATION", "WON", "LOST"] as const;
+const LOST_REASONS = ["PRICE", "DELIVERY", "PRODUCT_MISMATCH", "COMPETITOR", "TIMING", "NO_RESPONSE", "WRONG_CONTACT", "OTHER"] as const;
+const optDate = z.preprocess(
+  (v) => (v === "" || v == null ? null : new Date(String(v))),
+  z.date().refine((d) => !Number.isNaN(d.getTime()), "Geçerli bir tarih girin").nullable().optional(),
+);
+
+export const opportunityUpdateSchema = z.object({
+  id: z.string().min(1),
+  stage: z.enum(OPP_STAGES),
+  value: optMoney,
+  probability: z.preprocess((v) => (v === "" || v == null ? null : Number(v)), z.number().int().min(0).max(100).nullable().optional()),
+  expectedCloseAt: optDate,
+  lostReason: z.preprocess((v) => (v === "" ? null : v), z.enum(LOST_REASONS).nullable().optional()),
+  lostNote: optText(1000),
+});
+
+export const taskCreateSchema = z.object({
+  title: z.string().trim().min(3, "Görev başlığı gerekli").max(200),
+  description: optText(2000),
+  leadId: z.preprocess((v) => (v === "" ? null : v), z.string().min(1).nullable().optional()),
+  dueAt: optDate,
+  priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]).default("MEDIUM"),
+});
+
 export const messageEditSchema = z.object({
   id: z.string().min(1),
   subject: z.string().trim().min(3, "Konu gerekli").max(150),

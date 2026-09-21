@@ -112,5 +112,5 @@ tests/            birim + gerçek Postgres entegrasyon testleri
 | 1 | Setup, auth, DB, multi-tenancy, onboarding, şirket profili, ürünler, bilgi bankası, web sitesi analizi | ✅ |
 | 2 | Lead modeli, Apify provider, doğal dil lead arama, dedupe, enrichment, scoring, sinyaller, CSV içe aktarma | ✅ |
 | 3 | Kampanya, AI strateji, mesaj üretimi, compliance, suppression, e-posta sağlayıcı, onay, gönderim | ✅ (hatırlatma adımları Faz 4) |
-| 4 | Konuşma sınıflandırma, follow-up, CRM, görevler, satış koçu, analitik, AI chat | Sırada |
-| 5 | Teklif asistanı, rakip istihbaratı, WhatsApp Business API, entegrasyonlar | |
+| 4 | Yanıt sınıflandırma, follow-up, CRM, görevler, analitik, AI rapor, AI asistan | ✅ |
+| 5 | Teklif asistanı, rakip istihbaratı, WhatsApp Business API, entegrasyonlar | Sırada |

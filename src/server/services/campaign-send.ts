@@ -1,4 +1,5 @@
 import "server-only";
+import type { Message } from "@prisma/client";
 import { tenantDb } from "@/server/tenancy/tenant-db";
 import { env } from "@/server/env";
 import { getEmailProvider } from "@/server/providers/email";
@@ -8,6 +9,7 @@ import { AppError } from "@/lib/errors";
 import { findSuppression, refreshLeadCompliance } from "./compliance";
 import { getSenderSettings, type SenderSettings } from "./email-settings";
 import { oneClickUnsubscribeUrl, unsubscribeUrl } from "./unsubscribe";
+import { scheduleFollowUpsAfterSend } from "./followups";
 
 const CONTACTED_FROM = ["NEW", "RESEARCHING", "QUALIFIED", "CONTACT_READY"] as const;
 const THROTTLE_MS = () => (process.env.NODE_ENV === "test" ? 0 : 1500);
@@ -50,10 +52,136 @@ export interface SendRunResult {
   paused: boolean;
 }
 
+export type DeliveryOutcome = "sent" | "skipped" | "cancelled" | "failed" | "busy";
+
+interface DeliveryContext {
+  settings: SenderSettings;
+  provider: NonNullable<ReturnType<typeof getEmailProvider>>;
+}
+
 /**
- * Onaylı mesajları gönderir. Her mesajdan hemen önce:
- *   kampanya hâlâ RUNNING mi → engel listesi → uyum (SENDABLE olmalı) → günlük sınır.
- * Mesaj önce APPROVED→SCHEDULED olarak "kilitlenir"; süreç çökse bile aynı mesaj ikinci kez gönderilmez.
+ * Tek bir onaylı iletiyi gönderir. Kampanya iletisi de, yanıt taslağı da bu yoldan geçer:
+ *   engel listesi → uyum → kilit (APPROVED→SCHEDULED) → sağlayıcı → durum güncelleme.
+ * Alıcının kendi yazdığı bir konuşmaya yanıt ise (inbound varsa) iletişim dayanağı "gelen talep"tir;
+ * frekans sınırı uygulanmaz ama ret / engel yine kesin olarak engeller.
+ * Geçici sağlayıcı hatasında ileti APPROVED'a döner ve hata `retryable=true` ile fırlatılır.
+ */
+export async function deliverMessage(
+  companyId: string,
+  msg: Message,
+  { settings, provider }: DeliveryContext,
+): Promise<DeliveryOutcome> {
+  const db = tenantDb({ companyId });
+  if (!msg.toAddress) {
+    await db.message.update({ where: { id: msg.id }, data: { status: "FAILED", error: "Alıcı adresi yok." } });
+    return "failed";
+  }
+
+  // 1) Engel listesi (ret talebi onaydan sonra gelmiş olabilir)
+  const suppression = await findSuppression(companyId, { email: msg.toAddress, leadId: msg.leadId });
+  if (suppression) {
+    await db.message.update({ where: { id: msg.id }, data: { status: "CANCELLED", error: "Alıcı ret/engel listesinde." } });
+    return "cancelled";
+  }
+
+  // 2) Uyum
+  const { records } = await refreshLeadCompliance(companyId, msg.leadId);
+  const rec = records.find((r) => r.address === msg.toAddress) ?? null;
+  const isReply = msg.conversationId
+    ? (await db.conversationMessage.count({ where: { conversationId: msg.conversationId, direction: "INBOUND" } })) > 0
+    : false;
+  if (isReply) {
+    if (rec?.optOut || rec?.suppressed) {
+      await db.message.update({ where: { id: msg.id }, data: { status: "CANCELLED", error: "Alıcı iletişim istemiyor." } });
+      return "cancelled";
+    }
+  } else {
+    if (!rec || rec.status === "DO_NOT_SEND") {
+      await db.message.update({
+        where: { id: msg.id },
+        data: { status: "CANCELLED", complianceStatus: "DO_NOT_SEND", error: rec?.reasons[0] ?? "Adres artık gönderilemez." },
+      });
+      return "cancelled";
+    }
+    if (rec.status !== "SENDABLE") {
+      await db.message.update({ where: { id: msg.id }, data: { complianceStatus: rec.status, error: rec.reasons[0] ?? "İnceleme gerekli." } });
+      return "skipped";
+    }
+  }
+
+  // 3) Kilit: yalnızca hâlâ APPROVED ise gönder (eşzamanlı iki iş aynı mesajı gönderemez)
+  const claimed = await db.message.updateMany({ where: { id: msg.id, status: "APPROVED" }, data: { status: "SCHEDULED", scheduledAt: new Date() } });
+  if (claimed.count === 0) return "busy";
+
+  const email: OutgoingEmail = {
+    from: { email: settings.fromEmail, name: settings.fromName },
+    to: msg.toAddress,
+    replyTo: settings.replyTo ?? undefined,
+    subject: msg.subject ?? "",
+    ...buildEmailContent(msg.body, settings, unsubscribeUrl(companyId, msg.id)),
+    unsubscribeUrl: oneClickUnsubscribeUrl(companyId, msg.id),
+    messageId: msg.id,
+  };
+
+  try {
+    const res = await provider.send(email);
+    const now = new Date();
+    await db.message.update({
+      where: { id: msg.id },
+      data: {
+        status: "SENT",
+        sentAt: now,
+        provider: provider.name,
+        providerMessageId: res.providerMessageId || null,
+        complianceStatus: isReply ? "SENDABLE" : rec!.status,
+        error: null,
+      },
+    });
+    if (rec) await db.complianceRecord.update({ where: { id: rec.id }, data: { lastContactedAt: now } });
+    if (msg.contactId) await db.leadContact.updateMany({ where: { id: msg.contactId }, data: { lastContactedAt: now } });
+    if (!isReply) {
+      await db.lead.updateMany({ where: { id: msg.leadId, status: { in: [...CONTACTED_FROM] } }, data: { status: "CONTACTED" } });
+      if (msg.campaignId) {
+        await db.campaignLead.updateMany({
+          where: { campaignId: msg.campaignId, leadId: msg.leadId, status: { in: [...CONTACTED_FROM] } },
+          data: { status: "CONTACTED" },
+        });
+      }
+    }
+    if (msg.conversationId) await db.conversation.update({ where: { id: msg.conversationId }, data: { lastMessageAt: now } });
+    await scheduleFollowUpsAfterSend(companyId, { ...msg, sentAt: now });
+    return "sent";
+  } catch (err) {
+    const retryable = (err as { retryable?: boolean }).retryable !== false;
+    const message = (err as Error).message.slice(0, 500);
+    if (retryable) {
+      // Geçici hata: kilidi aç, iş tekrar denensin (gönderilenler SENT olduğu için tekrar gönderilmez)
+      await db.message.update({ where: { id: msg.id }, data: { status: "APPROVED", error: message } });
+      // Ağ hatası gibi işaretsiz hatalar da geçici sayılır; iş katmanı bu işarete bakar
+      (err as { retryable?: boolean }).retryable = true;
+      throw err;
+    }
+    await db.message.update({ where: { id: msg.id }, data: { status: "FAILED", error: message } });
+    return "failed";
+  }
+}
+
+async function deliveryContext(companyId: string): Promise<DeliveryContext> {
+  const provider = getEmailProvider();
+  if (!provider) throw new AppError("VALIDATION", "E-posta sağlayıcısı yapılandırılmamış.");
+  const { settings } = await getSenderSettings(companyId);
+  if (!settings) throw new AppError("VALIDATION", "Gönderici kimliği eksik.");
+  return { settings, provider };
+}
+
+async function remainingQuota(companyId: string) {
+  const sentToday = await tenantDb({ companyId }).message.count({ where: { direction: "OUTBOUND", sentAt: { gte: startOfToday() } } });
+  return Math.max(0, env().EMAIL_DAILY_LIMIT - sentToday);
+}
+
+/**
+ * Onaylı kampanya mesajlarını gönderir. Her mesajdan hemen önce kampanya hâlâ RUNNING mi
+ * kontrol edilir; günlük sınır aşılmaz. Tek ileti gönderimi `deliverMessage` ile yapılır.
  */
 export async function sendApprovedMessages(
   companyId: string,
@@ -61,13 +189,8 @@ export async function sendApprovedMessages(
   progress?: (pct: number) => Promise<void>,
 ): Promise<SendRunResult> {
   const db = tenantDb({ companyId });
-  const provider = getEmailProvider();
-  if (!provider) throw new AppError("VALIDATION", "E-posta sağlayıcısı yapılandırılmamış.");
-  const { settings } = await getSenderSettings(companyId);
-  if (!settings) throw new AppError("VALIDATION", "Gönderici kimliği eksik.");
-
-  const sentToday = await db.message.count({ where: { direction: "OUTBOUND", sentAt: { gte: startOfToday() } } });
-  const quota = Math.max(0, env().EMAIL_DAILY_LIMIT - sentToday);
+  const dctx = await deliveryContext(companyId);
+  const quota = await remainingQuota(companyId);
   const batch = await db.message.findMany({
     where: { campaignId, status: "APPROVED" },
     orderBy: { approvedAt: "asc" },
@@ -76,91 +199,29 @@ export async function sendApprovedMessages(
 
   const result: SendRunResult = { sent: 0, failed: 0, skipped: 0, remainingApproved: 0, quotaReached: false, paused: false };
   for (let i = 0; i < batch.length; i++) {
-    const msg = batch[i]!;
     const campaign = await db.campaign.findUnique({ where: { id: campaignId }, select: { status: true } });
     if (campaign?.status !== "RUNNING") {
       result.paused = true;
       break;
     }
-    if (!msg.toAddress) {
-      await db.message.update({ where: { id: msg.id }, data: { status: "FAILED", error: "Alıcı adresi yok." } });
-      result.failed++;
-      continue;
-    }
-
-    // 1) Engel listesi (ret talebi onaydan sonra gelmiş olabilir)
-    const suppression = await findSuppression(companyId, { email: msg.toAddress, leadId: msg.leadId });
-    if (suppression) {
-      await db.message.update({ where: { id: msg.id }, data: { status: "CANCELLED", error: "Alıcı ret/engel listesinde." } });
-      result.skipped++;
-      continue;
-    }
-    // 2) Uyum: yalnızca SENDABLE gönderilir; inceleme gerekenler APPROVED'da bekler
-    const { records } = await refreshLeadCompliance(companyId, msg.leadId);
-    const rec = records.find((r) => r.address === msg.toAddress);
-    if (!rec || rec.status === "DO_NOT_SEND") {
-      await db.message.update({ where: { id: msg.id }, data: { status: "CANCELLED", complianceStatus: "DO_NOT_SEND", error: rec?.reasons[0] ?? "Adres artık gönderilemez." } });
-      result.skipped++;
-      continue;
-    }
-    if (rec.status !== "SENDABLE") {
-      await db.message.update({ where: { id: msg.id }, data: { complianceStatus: rec.status, error: rec.reasons[0] ?? "İnceleme gerekli." } });
-      result.skipped++;
-      continue;
-    }
-
-    // 3) Kilit: yalnızca hâlâ APPROVED ise gönder (eşzamanlı iki iş aynı mesajı gönderemez)
-    const claimed = await db.message.updateMany({ where: { id: msg.id, status: "APPROVED" }, data: { status: "SCHEDULED", scheduledAt: new Date() } });
-    if (claimed.count === 0) continue;
-
-    const email: OutgoingEmail = {
-      from: { email: settings.fromEmail, name: settings.fromName },
-      to: msg.toAddress,
-      replyTo: settings.replyTo ?? undefined,
-      subject: msg.subject ?? "",
-      ...buildEmailContent(msg.body, settings, unsubscribeUrl(companyId, msg.id)),
-      unsubscribeUrl: oneClickUnsubscribeUrl(companyId, msg.id),
-      messageId: msg.id,
-    };
-
-    try {
-      const res = await provider.send(email);
-      const now = new Date();
-      await db.message.update({
-        where: { id: msg.id },
-        data: { status: "SENT", sentAt: now, provider: provider.name, providerMessageId: res.providerMessageId || null, complianceStatus: "SENDABLE", error: null },
-      });
-      await db.complianceRecord.update({ where: { id: rec.id }, data: { lastContactedAt: now } });
-      if (msg.contactId) await db.leadContact.updateMany({ where: { id: msg.contactId }, data: { lastContactedAt: now } });
-      await db.lead.updateMany({ where: { id: msg.leadId, status: { in: [...CONTACTED_FROM] } }, data: { status: "CONTACTED" } });
-      await db.campaignLead.updateMany({ where: { campaignId, leadId: msg.leadId }, data: { status: "CONTACTED" } });
-      result.sent++;
-    } catch (err) {
-      const retryable = (err as { retryable?: boolean }).retryable !== false;
-      const message = (err as Error).message.slice(0, 500);
-      if (retryable) {
-        // Geçici hata: kilidi aç, iş tekrar denensin (gönderilenler SENT olduğu için tekrar gönderilmez)
-        await db.message.update({ where: { id: msg.id }, data: { status: "APPROVED", error: message } });
-        // Ağ hatası gibi işaretsiz hatalar da geçici sayılır; iş katmanı bu işarete bakar
-        (err as { retryable?: boolean }).retryable = true;
-        throw err;
-      }
-      await db.message.update({ where: { id: msg.id }, data: { status: "FAILED", error: message } });
-      result.failed++;
-    }
+    const outcome = await deliverMessage(companyId, batch[i]!, dctx);
+    if (outcome === "sent") result.sent++;
+    else if (outcome === "failed") result.failed++;
+    else if (outcome === "skipped" || outcome === "cancelled") result.skipped++;
     await progress?.(((i + 1) / Math.max(1, batch.length)) * 95);
-    if (THROTTLE_MS() > 0) await new Promise((r) => setTimeout(r, THROTTLE_MS()));
+    if (outcome === "sent" && THROTTLE_MS() > 0) await new Promise((r) => setTimeout(r, THROTTLE_MS()));
   }
 
   result.remainingApproved = await db.message.count({ where: { campaignId, status: "APPROVED" } });
   result.quotaReached = result.remainingApproved > 0 && !result.paused && batch.length >= quota;
 
-  // Onay bekleyen / onaylı mesaj kalmadıysa kampanya tamamlanır
+  // Açık mesaj ve planlı hatırlatma kalmadıysa kampanya tamamlanır
   const open = await db.message.count({ where: { campaignId, status: { in: ["DRAFT", "PENDING_APPROVAL", "APPROVED", "SCHEDULED"] } } });
-  if (open === 0 && !result.paused) {
+  const pendingFollowUps = await db.followUp.count({ where: { campaignId, status: "SCHEDULED" } });
+  if (open === 0 && pendingFollowUps === 0 && !result.paused) {
     await db.campaign.updateMany({ where: { id: campaignId, status: "RUNNING" }, data: { status: "COMPLETED", completedAt: new Date() } });
   } else if (!result.paused && result.remainingApproved === 0) {
-    // Gönderilecek onaylı mesaj kalmadı ama onay bekleyen var → hazır durumuna dön
+    // Gönderilecek onaylı mesaj kalmadı; onay bekleyen mesaj veya planlı hatırlatma var → hazır durumuna dön
     await db.campaign.updateMany({ where: { id: campaignId, status: "RUNNING" }, data: { status: "READY" } });
   }
 
@@ -173,6 +234,18 @@ export async function sendApprovedMessages(
     metadata: { ...result },
   });
   return result;
+}
+
+/** Kampanya dışı tek ileti (ör. yanıt taslağı). HTTP isteğinde değil, iş (job) içinde çalışır. */
+export async function sendSingleApprovedMessage(companyId: string, messageId: string): Promise<DeliveryOutcome> {
+  const db = tenantDb({ companyId });
+  const msg = await db.message.findUnique({ where: { id: messageId } });
+  if (!msg || msg.status !== "APPROVED") return "busy";
+  if ((await remainingQuota(companyId)) <= 0) {
+    await db.message.update({ where: { id: msg.id }, data: { error: "Günlük gönderim sınırı doldu; yarın tekrar deneyin." } });
+    return "skipped";
+  }
+  return deliverMessage(companyId, msg, await deliveryContext(companyId));
 }
 
 /** Gönderim işi kalıcı olarak başarısız olursa kampanya duraklatılır (sessizce RUNNING kalmasın). */

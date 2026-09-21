@@ -22,6 +22,12 @@ export interface JobPayloads {
   "campaign.generate_messages": { campaignId: string; leadIds: string[]; usageId?: string };
   /** Onaylı mesajların gönderimi (günlük sınır, uyum ve engel kontrolü her mesajda tekrar yapılır) */
   "campaign.send": { campaignId: string };
+  /** Gelen yanıtın AI sınıflandırması + otomatik aksiyonlar (görev, fırsat, ret) */
+  "conversation.classify": { conversationMessageId: string };
+  /** Kampanya dışı tek onaylı ileti (ör. yanıt taslağı) */
+  "message.send": { messageId: string };
+  /** Şirketin vakti gelmiş hatırlatmaları (zamanlayıcı tetikler) */
+  "followup.run": Record<string, never>;
 }
 
 export type JobType = keyof JobPayloads;

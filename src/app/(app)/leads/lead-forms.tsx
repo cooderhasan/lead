@@ -8,6 +8,7 @@ import {
   searchLeadsAction,
 } from "@/app/actions/leads";
 import { reviewComplianceAction } from "@/app/actions/email";
+import { addReplyAction } from "@/app/actions/conversations";
 import { ActionForm, FormMessage, SubmitButton } from "@/components/forms";
 import { Field, Input, Select, Textarea } from "@/components/ui";
 import { Search, Sparkles, Upload } from "lucide-react";
@@ -124,6 +125,31 @@ export function ResearchLeadButton({ leadId, hasWebsite }: { leadId: string; has
             <Sparkles className="size-4" aria-hidden /> {hasWebsite ? "AI ile Analiz Et (2 kredi)" : "AI ile Analiz Et"}
           </SubmitButton>
           <FormMessage state={state} />
+        </>
+      )}
+    </ActionForm>
+  );
+}
+
+export function ManualReplyForm({ leadId, defaultFrom }: { leadId: string; defaultFrom: string }) {
+  return (
+    <ActionForm action={addReplyAction} resetOnSuccess>
+      {(state) => (
+        <>
+          <FormMessage state={state} />
+          <input type="hidden" name="leadId" value={leadId} />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Yanıtı gönderen" htmlFor="fromAddress" error={state.fieldErrors?.fromAddress}>
+              <Input id="fromAddress" name="fromAddress" type="email" defaultValue={defaultFrom} required />
+            </Field>
+            <Field label="Konu" htmlFor="replySubject">
+              <Input id="replySubject" name="subject" maxLength={300} />
+            </Field>
+          </div>
+          <Field label="Yanıt metni" htmlFor="replyBody" error={state.fieldErrors?.body} hint="AI sınıflandırır; ret ifadesi varsa adres hemen engel listesine eklenir.">
+            <Textarea id="replyBody" name="body" rows={5} required maxLength={50_000} />
+          </Field>
+          <SubmitButton size="sm" pendingText="Ekleniyor…" className="self-start">Yanıtı ekle</SubmitButton>
         </>
       )}
     </ActionForm>

@@ -220,3 +220,15 @@ describe("yardımcılar", () => {
     expect(can({ role: "VIEWER", isPlatformAdmin: true }, "member.manage")).toBe(true);
   });
 });
+
+describe("middleware herkese açık yollar", () => {
+  it("ret bağlantısı, webhook ve zamanlayıcı giriş istemez; uygulama sayfaları ister", async () => {
+    const { isPublicPath } = await import("@/middleware");
+    for (const p of ["/", "/login", "/register", "/u/abc.def.ghi", "/api/unsubscribe/abc.def.ghi", "/api/webhooks/email/resend", "/api/webhooks/email/inbound", "/api/cron/tick"]) {
+      expect(isPublicPath(p), p).toBe(true);
+    }
+    for (const p of ["/dashboard", "/leads", "/admin", "/api/jobs/x", "/users", "/login-fake", "/uploads"]) {
+      expect(isPublicPath(p), p).toBe(false);
+    }
+  });
+});

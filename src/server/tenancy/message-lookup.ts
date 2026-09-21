@@ -12,3 +12,36 @@ export async function findMessageOwner(providerMessageId: string) {
     select: { id: true, companyId: true },
   });
 }
+
+/**
+ * Gelen yanıtın hangi şirkete ait olduğu: önce referanslardaki bizim / sağlayıcının mesaj kimliği,
+ * olmazsa alıcı adresinin bir şirketin gönderici veya yanıt adresi olması. Yalnızca companyId döner.
+ */
+export async function findCompanyForInbound(input: { references: string[]; to: string[] }): Promise<string | null> {
+  const refs = input.references.map((r) => r.replace(/[<>]/g, "").trim()).filter(Boolean);
+  if (refs.length) {
+    const ids = refs.flatMap((r) => [r, r.split("@")[0]!]);
+    const byRef = await rawDb.message.findFirst({
+      where: { direction: "OUTBOUND", OR: [{ id: { in: ids } }, { providerMessageId: { in: [...refs, ...refs.map((r) => `<${r}>`)] } }] },
+      select: { companyId: true },
+    });
+    if (byRef) return byRef.companyId;
+  }
+  for (const to of input.to.map((t) => t.trim().toLowerCase()).filter(Boolean)) {
+    const rows = await rawDb.integration.findMany({
+      where: {
+        type: "EMAIL_PROVIDER",
+        provider: "sender",
+        OR: [
+          { config: { path: ["sender", "fromEmail"], equals: to } },
+          { config: { path: ["sender", "replyTo"], equals: to } },
+        ],
+      },
+      select: { companyId: true },
+      take: 2,
+    });
+    // Aynı adresi iki şirket kullanıyorsa belirsizdir; yanlış şirkete yazmamak için eşleştirme yapılmaz
+    if (rows.length === 1) return rows[0]!.companyId;
+  }
+  return null;
+}

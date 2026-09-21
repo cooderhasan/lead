@@ -26,6 +26,10 @@ Alan adı panelinde (aktifyay.com.tr) bir **A kaydı** ekleyin:
      ve webhook anahtarı (`SERVICE_PASSWORD_64_EMAILWEBHOOK`) Coolify tarafından üretilir.
    - Geri dönme / spam şikâyeti takibi: sağlayıcı panelinde webhook adresi olarak
      `https://lead.aktifyay.com.tr/api/webhooks/email/resend?token=<SERVICE_PASSWORD_64_EMAILWEBHOOK değeri>` (Brevo için `/brevo`) girin.
+   - **Gelen yanıtlar (Faz 4)**: sağlayıcının gelen kutusu yönlendirmesini (Brevo → Inbound Parsing) şu adrese ayarlayın:
+     `https://lead.aktifyay.com.tr/api/webhooks/email/inbound?token=<SERVICE_PASSWORD_64_EMAILWEBHOOK değeri>`.
+     Webhook kurmadan da lead sayfasından yanıtı elle ekleyebilirsiniz; AI sınıflandırma ve görev/fırsat oluşturma aynı çalışır.
+   - Hatırlatmalar: uygulama içi zamanlayıcı her 15 dakikada vakti gelen hatırlatmaların taslağını hazırlar (`SCHEDULER_ENABLED=true`).
 5. **Deploy**. İlk açılışta tablolar ve Aktif Yay demo verisi otomatik kurulur (1–3 dk).
 
 ## 3) Giriş bilgileri
