@@ -49,11 +49,16 @@ export async function requireTenant(): Promise<TenantContext> {
   return ctx;
 }
 
-/** Sayfalar için: bağlam yoksa yönlendirir. */
+/**
+ * Sayfalar için: bağlam yoksa yönlendirir.
+ * Oturum açık ama hiçbir şirkete üye değilse /login'e GÖNDERİLMEZ — giriş sayfası oturumu görüp
+ * /dashboard'a geri yolladığı için sonsuz döngü olur. Platform yöneticisi /admin'e, diğerleri
+ * açıklama sayfasına gider.
+ */
 export async function requireTenantPage(): Promise<TenantContext> {
-  await requireUserPage();
+  const user = await requireUserPage();
   const ctx = await resolveTenant();
-  if (!ctx) redirect("/login");
+  if (!ctx) redirect(user.isPlatformAdmin ? "/admin" : "/no-company");
   return ctx;
 }
 

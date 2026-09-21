@@ -2,8 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getCurrentUser } from "@/server/auth/session";
+import { resolveTenant } from "@/server/tenancy/context";
 import { getPlatformOverview } from "@/server/admin/stats";
-import { Badge, Card, CardBody, CardHeader, EmptyState, PageHeader, Stat } from "@/components/ui";
+import { logoutAction } from "@/app/actions/auth";
+import { Badge, Button, Card, CardBody, CardHeader, EmptyState, PageHeader, Stat } from "@/components/ui";
 import { formatDate, formatDateTime, formatNumber } from "@/lib/cn";
 
 export const metadata: Metadata = { title: "Platform yönetimi" };
@@ -11,11 +13,23 @@ export const metadata: Metadata = { title: "Platform yönetimi" };
 export default async function AdminPage() {
   const user = await getCurrentUser();
   if (!user?.isPlatformAdmin) notFound();
-  const o = await getPlatformOverview();
+  const [o, tenant] = await Promise.all([getPlatformOverview(), resolveTenant()]);
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-      <PageHeader title="Platform yönetimi" description="Tüm şirketler, AI maliyeti, başarısız işler ve audit log." actions={<Link href="/dashboard" className="text-sm text-accent">← Uygulamaya dön</Link>} />
+      <PageHeader
+        title="Platform yönetimi"
+        description="Tüm şirketler, AI maliyeti, başarısız işler ve audit log."
+        actions={
+          <div className="flex items-center gap-3">
+            {/* Yöneticinin kendi şirketi yoksa uygulamaya dönüş /admin'e geri yönlenir; bağlantı gösterilmez */}
+            {tenant && <Link href="/dashboard" className="text-sm text-accent">← Uygulamaya dön</Link>}
+            <form action={logoutAction}>
+              <Button type="submit" variant="ghost" size="sm">Çıkış yap</Button>
+            </form>
+          </div>
+        }
+      />
 
       <Card className="mb-6">
         <CardBody className="grid grid-cols-2 gap-6 py-5 sm:grid-cols-4">
