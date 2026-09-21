@@ -27,6 +27,8 @@ const schema = z.object({
   AI_FALLBACK_MODEL: optionalString,
   ANTHROPIC_API_KEY: optionalString,
   OPENAI_API_KEY: optionalString,
+  /** OpenAI uyumlu başka servis (ör. OpenRouter: https://openrouter.ai/api/v1). Boşsa api.openai.com */
+  OPENAI_BASE_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
   GEMINI_API_KEY: optionalString,
 
   EMBEDDING_PROVIDER: z.preprocess(emptyToUndefined, z.enum(["none", "openai", "gemini", "voyage"]).default("none")),

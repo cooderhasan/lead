@@ -35,6 +35,8 @@ export class OpenAIProvider implements AIProvider {
         model: input.model,
         messages,
         max_completion_tokens: input.maxTokens ?? 4096,
+        // OpenAI uyumlu diğer servisler (OpenRouter vb.) max_tokens okur
+        ...(this.baseUrl.includes("api.openai.com") ? {} : { max_tokens: input.maxTokens ?? 4096 }),
         ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
       },
       { authorization: `Bearer ${this.apiKey}` },

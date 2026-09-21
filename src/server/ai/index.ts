@@ -41,7 +41,7 @@ function buildProvider(name: ProviderName): AIProvider {
     case "anthropic":
       return new AnthropicProvider(e.ANTHROPIC_API_KEY ?? "");
     case "openai":
-      return new OpenAIProvider(e.OPENAI_API_KEY ?? "");
+      return new OpenAIProvider(e.OPENAI_API_KEY ?? "", e.OPENAI_BASE_URL?.replace(/\/$/, ""));
     case "gemini":
       return new GeminiProvider(e.GEMINI_API_KEY ?? "");
   }

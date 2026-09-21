@@ -10,7 +10,10 @@ services:
       - SERVICE_FQDN_APP_3000
       - APP_URL=${SERVICE_FQDN_APP}
       - DATABASE_URL=postgresql://salesos:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/salesos?schema=public
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # OpenAI veya OpenAI uyumlu servis (OpenRouter): AI_PROVIDER=openai + OPENAI_BASE_URL
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
       - AI_PROVIDER=${AI_PROVIDER:-anthropic}
       - AI_MODEL=${AI_MODEL:-claude-sonnet-5}
       - AI_FAST_MODEL=${AI_FAST_MODEL:-claude-haiku-4-5-20251001}
