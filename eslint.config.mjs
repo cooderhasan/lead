@@ -10,6 +10,8 @@ const config = [
   {
     rules: {
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
+      // Döngüsel import production bundle'da "Cannot access before initialization" ile sayfaları çökertir
+      "import/no-cycle": ["error", { ignoreExternal: true, allowUnsafeDynamicCyclicDependency: true }],
       // UI ve servisler Prisma'yı doğrudan import etmez; tenantDb() kullanılır.
       "no-restricted-imports": [
         "error",

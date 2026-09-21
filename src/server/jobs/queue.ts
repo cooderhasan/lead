@@ -2,7 +2,6 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import { rawDb } from "@/server/db";
 import { env } from "@/server/env";
-import { runJob } from "./runner";
 import type { JobType, JobPayloads } from "./types";
 
 export const QUEUE_NAME = "ai-sales-os";
@@ -75,6 +74,9 @@ export async function enqueue<T extends JobType>(
 async function runInlineWithRetry(jobId: string, maxAttempts: number) {
   // Yanıtın önce dönmesi için bir tur bekle
   await new Promise((r) => setTimeout(r, 0));
+  // Dinamik import: handler'lar servisleri, servisler enqueue()'yu import eder. Statik import
+  // döngü oluşturur ve production bundle'da "Cannot access before initialization" hatası verir.
+  const { runJob } = await import("./runner");
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       await runJob(jobId, { isFinalAttempt: attempt === maxAttempts });
