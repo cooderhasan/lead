@@ -153,9 +153,10 @@ async function main() {
   await seedAktifYay(demo.id);
 
   console.log("\nHazır. Giriş bilgileri:");
-  console.log(`  Demo (Aktif Yay): ${DEMO_EMAIL} / ${DEMO_PASSWORD}`);
-  console.log(`  Platform admin : ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}`);
-  console.log("  (Production'da SEED_* ortam değişkenleriyle değiştirin.)");
+  // Production'da parolalar loga YAZILMAZ (sunucu loglarına erişen herkes görebilir); ortam değişkeninde durur
+  const pw = (p: string) => (process.env.NODE_ENV === "production" ? "(parola: SERVICE_PASSWORD_* / SEED_* ortam değişkeninde)" : p);
+  console.log(`  Demo (Aktif Yay): ${DEMO_EMAIL} / ${pw(DEMO_PASSWORD)}`);
+  console.log(`  Platform admin : ${ADMIN_EMAIL} / ${pw(ADMIN_PASSWORD)}`);
 }
 
 main()

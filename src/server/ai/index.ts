@@ -110,6 +110,30 @@ export interface ExtractInput<T extends z.ZodTypeAny> {
  * - Retry (exponential backoff) + fallback sağlayıcı
  * - Her çağrıyı AIUsageLog'a yazar (companyId, model, token, tahmini maliyet)
  */
+/**
+ * Sağlayıcı hatasını kullanıcıya anlaşılır Türkçe nedene çevirir. Yapılandırma hataları (geçersiz anahtar,
+ * bakiye yok, model erişimi) "birkaç dakika sonra deneyin" ile gizlenmez; ne yapılacağı söylenir.
+ */
+export function describeProviderError(err: unknown): string {
+  const status = err instanceof AIProviderError ? err.status : undefined;
+  const msg = err instanceof Error ? err.message : String(err ?? "");
+  if (/credit balance|insufficient.?(credit|quota|funds)|billing/i.test(msg)) {
+    return "AI sağlayıcı hesabında kullanılabilir bakiye yok. console.anthropic.com → Billing'den bakiye yükleyin (Claude.ai aboneliği API bakiyesi sayılmaz).";
+  }
+  if (status === 401 || /invalid.?x-api-key|authentication_error|invalid api key/i.test(msg)) {
+    return "AI API anahtarı geçersiz. Yöneticiniz ANTHROPIC_API_KEY değerini kontrol etmeli (console.anthropic.com → API Keys; başında/sonunda boşluk olmamalı).";
+  }
+  if (status === 404 || /not_found_error|model.*not found/i.test(msg)) {
+    return "Seçili AI modeline erişim yok. Yöneticiniz AI_MODEL / AI_FAST_MODEL ayarını hesabın erişebildiği bir modelle değiştirmeli.";
+  }
+  if (status === 403 || /permission_error/i.test(msg)) {
+    return "AI API anahtarının bu işlem için yetkisi yok (anahtarın ait olduğu çalışma alanını kontrol edin).";
+  }
+  if (status === 429) return "AI kullanım sınırına ulaşıldı. Birkaç dakika sonra tekrar deneyin.";
+  if (status === 400) return `AI isteği reddedildi: ${msg.replace(/^\w+ 400: /, "").slice(0, 200)}`;
+  return "AI servisine şu an ulaşılamıyor. Lütfen birkaç dakika sonra tekrar deneyin.";
+}
+
 export class AIService {
   constructor(private readonly ctx: AICallContext) {}
 
@@ -179,7 +203,7 @@ export class AIService {
     }
 
     console.error("[ai] tüm denemeler başarısız", this.ctx.operation, lastError);
-    throw new AppError("AI_UNAVAILABLE", "AI servisine şu an ulaşılamıyor. Lütfen birkaç dakika sonra tekrar deneyin.");
+    throw new AppError("AI_UNAVAILABLE", describeProviderError(lastError));
   }
 
   /**

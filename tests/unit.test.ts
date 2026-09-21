@@ -232,3 +232,14 @@ describe("middleware herkese açık yollar", () => {
     }
   });
 });
+
+describe("AI hata açıklaması", () => {
+  it("yapılandırma hatalarını anlaşılır nedene çevirir", async () => {
+    const { describeProviderError } = await import("@/server/ai");
+    const { AIProviderError } = await import("@/server/ai/types");
+    expect(describeProviderError(new AIProviderError('anthropic 401: {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}', "anthropic", 401))).toMatch(/anahtarı geçersiz/);
+    expect(describeProviderError(new AIProviderError("anthropic 400: Your credit balance is too low to access the Anthropic API.", "anthropic", 400))).toMatch(/bakiye/);
+    expect(describeProviderError(new AIProviderError("anthropic 404: not_found_error model: x", "anthropic", 404))).toMatch(/modeline erişim/);
+    expect(describeProviderError(new AIProviderError("anthropic bağlantı hatası: fetch failed", "anthropic", undefined, true))).toMatch(/ulaşılamıyor/);
+  });
+});
