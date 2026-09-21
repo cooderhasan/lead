@@ -7,6 +7,7 @@ export const CREDIT_COSTS = {
   "lead.discovery": 1,
   "website.analyze": 2,
   "lead.enrich": 2,
+  "lead.score": 1,
   "ai.deep_research": 3,
   "ai.message": 1,
   "document.analyze": 5,
@@ -19,6 +20,7 @@ export const OPERATION_LABELS: Record<string, string> = {
   "lead.discovery": "Lead bulma",
   "website.analyze": "Web sitesi analizi",
   "lead.enrich": "Lead zenginleştirme",
+  "lead.score": "Lead puanlama",
   "ai.deep_research": "AI derin araştırma",
   "ai.message": "AI mesaj",
   "document.analyze": "Doküman analizi",
@@ -74,8 +76,12 @@ export async function consumeCredits(input: ConsumeInput): Promise<{ remaining: 
   });
 }
 
-/** Başarısız işlemde krediyi iade eder (ör. AI veya kaynak hatası). */
-export async function refundCredits(usageId: string, reason: string): Promise<void> {
+/**
+ * Başarısız işlemde krediyi iade eder (ör. AI veya kaynak hatası).
+ * `amount` verilirse kısmi iade yapılır (ör. 50 lead için ayrılan kredinin yalnızca 12 lead kullanılması).
+ * Her kullanım kaydı için en fazla bir iade yapılır (idempotent).
+ */
+export async function refundCredits(usageId: string, reason: string, amount?: number): Promise<void> {
   await rawDb.$transaction(async (tx) => {
     const usage = await tx.usageRecord.findUnique({ where: { id: usageId } });
     if (!usage || usage.credits >= 0) return;
@@ -83,12 +89,14 @@ export async function refundCredits(usageId: string, reason: string): Promise<vo
       where: { companyId: usage.companyId, operation: "credit.refund", refId: usageId },
     });
     if (already) return;
-    await tx.company.update({ where: { id: usage.companyId }, data: { creditBalance: { increment: -usage.credits } } });
+    const refund = Math.min(-usage.credits, amount ?? -usage.credits);
+    if (refund <= 0) return;
+    await tx.company.update({ where: { id: usage.companyId }, data: { creditBalance: { increment: refund } } });
     await tx.usageRecord.create({
       data: {
         companyId: usage.companyId,
         operation: "credit.refund",
-        credits: -usage.credits,
+        credits: refund,
         refType: reason.slice(0, 100),
         refId: usageId,
       },

@@ -166,6 +166,36 @@ export const factEditSchema = z.object({
   value: z.string().trim().min(1, "Değer boş olamaz.").max(1500),
 });
 
+// ── Lead (Faz 2) ──────────────────────────────────────────────────────
+export const leadSearchFormSchema = z.object({
+  prompt: z.string().trim().min(3, "Ne tür firmalar aradığınızı yazın").max(1000),
+  limit: z.preprocess((v) => (v === "" || v == null ? undefined : Number(v)), z.number().int().min(1).max(500).optional()),
+});
+
+export const manualLeadSchema = z.object({
+  companyName: z.string().trim().min(2, "Firma adı gerekli").max(300),
+  website: optText(500),
+  phone: optText(50),
+  genericEmail: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+    z.string().trim().email("Geçerli bir e-posta girin").max(200).nullable().optional(),
+  ),
+  city: optText(120),
+  district: optText(120),
+  address: optText(500),
+  category: optText(200),
+});
+
+export const LEAD_STATUSES = [
+  "NEW", "RESEARCHING", "QUALIFIED", "CONTACT_READY", "CONTACTED", "REPLIED", "INTERESTED",
+  "QUALIFIED_OPPORTUNITY", "QUOTE_REQUESTED", "PROPOSAL_SENT", "NEGOTIATION", "WON", "LOST", "NURTURE", "SUPPRESSED",
+] as const;
+
+export const leadStatusSchema = z.object({
+  id: z.string().min(1),
+  status: z.enum(LEAD_STATUSES),
+});
+
 /** "Tel çapı: 0,5–8 mm" satırlarını anahtar/değer nesnesine çevirir. */
 export function parseSpecs(text: string | null | undefined): Record<string, string> | null {
   if (!text) return null;

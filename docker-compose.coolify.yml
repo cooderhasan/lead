@@ -15,6 +15,8 @@ services:
       - AI_MODEL=${AI_MODEL:-claude-sonnet-5}
       - AI_FAST_MODEL=${AI_FAST_MODEL:-claude-haiku-4-5-20251001}
       - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-none}
+      - APIFY_TOKEN=${APIFY_TOKEN:-}
+      - LEAD_SEARCH_MAX=${LEAD_SEARCH_MAX:-50}
       - QUEUE_DRIVER=inline
       - STORAGE_DRIVER=local
       - STORAGE_LOCAL_DIR=/app/storage

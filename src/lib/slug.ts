@@ -15,7 +15,12 @@ export function slugify(input: string): string {
 /** Karşılaştırma için normalize edilmiş şirket adı (dedupe, Faz 2). */
 export function normalizeCompanyName(name: string): string {
   return slugify(name)
-    .replace(/-(a-s|as|ltd|sti|san|tic|ve|limited|sirketi|anonim|ins|dis|paz|gmbh|inc|llc|co)(?=-|$)/g, "")
+    .replace(
+      /-(a-s|as|ltd|sti|san|sanayi|tic|ticaret|ve|limited|sirketi|anonim|ins|dis|paz|pazarlama|ith|ihr|ithalat|ihracat|koll|holding|gmbh|ag|bv|srl|spa|plc|inc|corp|llc|co)(?=-|$)/g,
+      "",
+    )
+    // Ekler art arda geldiğinde ("san-ve-tic") bir tur daha
+    .replace(/-(a-s|as|ltd|sti|san|sanayi|tic|ticaret|ve|limited|sirketi|anonim)(?=-|$)/g, "")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
 }

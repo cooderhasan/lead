@@ -68,8 +68,8 @@ if exist ".env" (
   copy /y ".env.example" ".env" >nul
   echo        .env olusturuldu.
 )
-rem Veritabani portu 5433 (eski .env dosyalarini da duzelt)
-powershell -NoProfile -Command "$p='.env'; $t=[IO.File]::ReadAllText($p); if ($t.Contains('localhost:5432/')) { [IO.File]::WriteAllText($p, $t.Replace('localhost:5432/','localhost:5433/')); Write-Host '       Veritabani portu 5433 olarak guncellendi.' }"
+rem Veritabani portu 55432 (eski .env dosyalarini da duzelt: 5432/5433 yerel Postgres ile cakisiyordu)
+powershell -NoProfile -Command "$p='.env'; $t=[IO.File]::ReadAllText($p); $n=$t.Replace('localhost:5432/','localhost:55432/').Replace('localhost:5433/','localhost:55432/'); if ($n -ne $t) { [IO.File]::WriteAllText($p, $n); Write-Host '       Veritabani portu 55432 olarak guncellendi.' }"
 echo.
 
 echo [5/7] Veritabani baslatiliyor (Docker)...

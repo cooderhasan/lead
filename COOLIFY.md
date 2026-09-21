@@ -14,6 +14,8 @@ Alan adı panelinde (aktifyay.com.tr) bir **A kaydı** ekleyin:
 4. **Environment Variables**:
    - `ANTHROPIC_API_KEY` = Anthropic anahtarınız (**zorunlu**, "Is Secret" işaretleyin)
    - `ALLOW_SIGNUP` = `false` → yabancılar kayıt olup AI kredinizi harcayamaz (müşteriye hesap açmak için geçici `true` yapabilirsiniz)
+   - `APIFY_TOKEN` = Apify API anahtarı (**isteğe bağlı**, "Is Secret") → Leads ekranında "AI ile lead bul" açılır. Boşsa CSV içe aktarma ve elle ekleme çalışır.
+   - `LEAD_SEARCH_MAX` = tek aramada en fazla lead (varsayılan 50; her yeni lead 1 kredi)
    - Diğer her şey otomatik: veritabanı şifresi, demo ve admin parolaları Coolify tarafından üretilir.
 5. **Deploy**. İlk açılışta tablolar ve Aktif Yay demo verisi otomatik kurulur (1–3 dk).
 

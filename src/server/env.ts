@@ -38,6 +38,10 @@ const schema = z.object({
   S3_SECRET_ACCESS_KEY: optionalString,
 
   APIFY_TOKEN: optionalString,
+  /** Google Haritalar actor kimliği (Apify "kullanıcı~actor" biçimi) */
+  APIFY_GOOGLE_MAPS_ACTOR: optionalString,
+  /** Tek aramada en fazla kaç lead toplanır (kredi koruması) */
+  LEAD_SEARCH_MAX: z.coerce.number().int().min(1).max(500).default(50),
   EMAIL_PROVIDER: optionalString,
 });
 

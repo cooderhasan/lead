@@ -47,6 +47,8 @@ Tarayıcı: http://localhost:3000
 
 > Production'da `SEED_DEMO_PASSWORD` / `SEED_ADMIN_PASSWORD` ortam değişkenleriyle değiştirin.
 
+> Docker Postgres host portu **55432**'dir (5432/5433 yerel Postgres kurulumlarıyla çakışmasın diye).
+
 Docker kullanmıyorsanız: Postgres 16 + [pgvector](https://github.com/pgvector/pgvector) kurup `DATABASE_URL` ve `TEST_DATABASE_URL`'i ayarlayın.
 Redis gerekmez (`QUEUE_DRIVER=inline`).
 
@@ -72,6 +74,9 @@ Tüm ayarlar `.env` — ayrıntı için [.env.example](.env.example).
   Yedek sağlayıcı: `AI_FALLBACK_PROVIDER`.
 - **Embedding**: Anthropic embedding sunmadığı için varsayılan `none` → bilgi bankası Postgres tam metin araması kullanır.
   `EMBEDDING_PROVIDER=voyage|openai|gemini` ile vektör araması eklenir.
+- **Lead arama**: `APIFY_TOKEN` (Google Haritalar). Boşsa otomatik arama kapalıdır; CSV içe aktarma ve elle ekleme çalışır.
+  Tek aramada en fazla `LEAD_SEARCH_MAX` lead (varsayılan 50). Yalnızca **yeni** eklenen lead ücretlendirilir (1 kredi);
+  mevcut kayıtla eşleşen lead ücretsizdir, kullanılmayan kredi iade edilir.
 - **Kuyruk**: `inline` (geliştirme) · `bullmq` (production; Redis + `npm run worker`).
 - **Depolama**: `local` (./storage) · `s3` (MinIO / R2 / S3).
 
@@ -105,7 +110,7 @@ tests/            birim + gerçek Postgres entegrasyon testleri
 | Faz | İçerik | Durum |
 |---|---|---|
 | 1 | Setup, auth, DB, multi-tenancy, onboarding, şirket profili, ürünler, bilgi bankası, web sitesi analizi | ✅ |
-| 2 | Lead modeli, Apify provider, doğal dil lead arama, dedupe, enrichment, scoring, sinyaller | Sırada |
-| 3 | Kampanya, AI strateji, mesaj üretimi, compliance, suppression, e-posta sağlayıcı, onay, gönderim | |
+| 2 | Lead modeli, Apify provider, doğal dil lead arama, dedupe, enrichment, scoring, sinyaller, CSV içe aktarma | ✅ |
+| 3 | Kampanya, AI strateji, mesaj üretimi, compliance, suppression, e-posta sağlayıcı, onay, gönderim | Sırada |
 | 4 | Konuşma sınıflandırma, follow-up, CRM, görevler, satış koçu, analitik, AI chat | |
 | 5 | Teklif asistanı, rakip istihbaratı, WhatsApp Business API, entegrasyonlar | |
