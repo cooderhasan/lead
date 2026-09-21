@@ -13,7 +13,9 @@ import { Alert, Badge, Button, Card, CardBody, CardHeader, EmptyState, PageHeade
 import { isAppError } from "@/lib/errors";
 import { LEAD_STATUSES } from "@/lib/validation";
 import { SCORE_LABELS, SCORE_MAX, scoreTone, type ScoreKey } from "@/lib/lead-scoring";
-import { ResearchLeadButton, ScoreLeadsButton } from "../lead-forms";
+import { listLeadCompliance, refreshLeadCompliance } from "@/server/services/compliance";
+import { BASIS_LABELS, COMPLIANCE_LABELS } from "@/lib/compliance";
+import { ComplianceReviewForm, ResearchLeadButton, ScoreLeadsButton } from "../lead-forms";
 
 export const metadata: Metadata = { title: "Lead" };
 
@@ -70,7 +72,14 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     if (isAppError(err) && err.code === "NOT_FOUND") notFound();
     throw err;
   }
-  const [activeJob, lastError] = await Promise.all([getActiveLeadJob(ctx, id), getLastLeadJobError(ctx, id)]);
+  // Uyum kayıtlarını güncel tut (adres / engel listesi değişmiş olabilir); ucuz, AI kullanmaz
+  if (can(ctx, "lead.write")) await refreshLeadCompliance(ctx.companyId, id);
+  const [activeJob, lastError, compliance] = await Promise.all([
+    getActiveLeadJob(ctx, id),
+    getLastLeadJobError(ctx, id),
+    listLeadCompliance(ctx, id),
+  ]);
+  const canReview = can(ctx, "compliance.review");
   const canWrite = can(ctx, "lead.write");
   const aiReady = isAIConfigured();
   const score = lead.scores[0];
@@ -312,6 +321,34 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                 )}
               </dl>
             </CardBody>
+          </Card>
+
+          <Card id="uyum">
+            <CardHeader title="Gönderim uygunluğu" description="E-posta adresleri gönderimden önce bu kurallarla kontrol edilir." />
+            {compliance.length === 0 ? (
+              <CardBody><p className="text-sm text-text-3">E-posta adresi yok — bu lead&apos;e e-posta kampanyası gönderilemez.</p></CardBody>
+            ) : (
+              <ul className="divide-y divide-border">
+                {compliance.map((r) => (
+                  <li key={r.id} className="flex flex-col gap-1.5 px-5 py-3 text-sm">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate font-medium text-text">{r.address}</span>
+                      <Badge tone={r.status === "SENDABLE" ? "success" : r.status === "DO_NOT_SEND" ? "danger" : "warning"}>
+                        {COMPLIANCE_LABELS[r.status]}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-text-2">
+                      {r.contactType === "PERSONAL" ? "Kişisel" : "Kurumsal"} · {BASIS_LABELS[r.communicationBasis]}
+                      {r.reviewedAt && " · insan incelemesi yapıldı"}
+                    </p>
+                    {r.reasons.map((reason, i) => <p key={i} className="text-xs text-text-3">{reason}</p>)}
+                    {canReview && r.status === "REVIEW_REQUIRED" && !r.optOut && !r.suppressed && (
+                      <ComplianceReviewForm recordId={r.id} leadId={lead.id} />
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
           </Card>
 
           <Card>

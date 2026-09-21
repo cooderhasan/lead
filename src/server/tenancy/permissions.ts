@@ -25,10 +25,16 @@ export const PERMISSIONS = {
   // Faz 2+
   "lead.read": "VIEWER",
   "lead.write": "MEMBER",
+  "campaign.read": "VIEWER",
   "campaign.write": "MEMBER",
   "campaign.approve": "ADMIN",
   "message.approve": "MEMBER",
   "proposal.approve": "ADMIN",
+  // Faz 3 — uyum ve gönderim
+  "compliance.review": "ADMIN",
+  "suppression.manage": "ADMIN",
+  "email.settings": "ADMIN",
+  "email.send": "ADMIN",
 } as const satisfies Record<string, MemberRole>;
 
 export type Permission = keyof typeof PERMISSIONS;

@@ -196,6 +196,35 @@ export const leadStatusSchema = z.object({
   status: z.enum(LEAD_STATUSES),
 });
 
+// ── E-posta / kampanya (Faz 3) ──────────────────────────────────────────
+export const senderSettingsSchema = z.object({
+  fromName: z.string().trim().min(2, "Gönderen adı gerekli").max(100),
+  fromEmail: z.string().trim().toLowerCase().email("Geçerli bir e-posta girin").max(200),
+  replyTo: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+    z.string().trim().toLowerCase().email("Geçerli bir e-posta girin").max(200).nullable().optional(),
+  ),
+  /** Ticari iletide gönderici kimliği (6563 s.K.) — ticari unvan */
+  legalName: z.string().trim().min(3, "Ticari unvan gerekli").max(200),
+  postalAddress: z.string().trim().min(10, "Açık adres gerekli").max(400),
+  phone: optText(50),
+  signature: optText(600),
+});
+
+export const campaignCreateSchema = z.object({
+  name: z.string().trim().min(3, "Kampanya adı gerekli").max(120),
+  targetDescription: z.string().trim().min(10, "Hedefi birkaç cümleyle anlatın").max(1500),
+  productIds: z.preprocess((v) => (v === undefined ? [] : Array.isArray(v) ? v : [v]), z.array(z.string().min(1)).max(20)),
+  minScore: z.preprocess((v) => (v === "" || v == null ? undefined : Number(v)), z.number().int().min(0).max(100).optional()),
+  maxLeads: z.preprocess((v) => (v === "" || v == null ? undefined : Number(v)), z.number().int().min(1).max(500).optional()),
+});
+
+export const messageEditSchema = z.object({
+  id: z.string().min(1),
+  subject: z.string().trim().min(3, "Konu gerekli").max(150),
+  body: z.string().trim().min(40, "Mesaj çok kısa").max(5000),
+});
+
 /** "Tel çapı: 0,5–8 mm" satırlarını anahtar/değer nesnesine çevirir. */
 export function parseSpecs(text: string | null | undefined): Record<string, string> | null {
   if (!text) return null;

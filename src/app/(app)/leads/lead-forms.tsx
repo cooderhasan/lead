@@ -7,8 +7,9 @@ import {
   scoreLeadsAction,
   searchLeadsAction,
 } from "@/app/actions/leads";
+import { reviewComplianceAction } from "@/app/actions/email";
 import { ActionForm, FormMessage, SubmitButton } from "@/components/forms";
-import { Field, Input, Textarea } from "@/components/ui";
+import { Field, Input, Select, Textarea } from "@/components/ui";
 import { Search, Sparkles, Upload } from "lucide-react";
 
 export function LeadSearchForm({ enabled, maxLimit }: { enabled: boolean; maxLimit: number }) {
@@ -122,6 +123,30 @@ export function ResearchLeadButton({ leadId, hasWebsite }: { leadId: string; has
           <SubmitButton pendingText="Başlatılıyor…" size="sm">
             <Sparkles className="size-4" aria-hidden /> {hasWebsite ? "AI ile Analiz Et (2 kredi)" : "AI ile Analiz Et"}
           </SubmitButton>
+          <FormMessage state={state} />
+        </>
+      )}
+    </ActionForm>
+  );
+}
+
+export function ComplianceReviewForm({ recordId, leadId }: { recordId: string; leadId: string }) {
+  return (
+    <ActionForm action={reviewComplianceAction} className="gap-2">
+      {(state) => (
+        <>
+          <input type="hidden" name="id" value={recordId} />
+          <input type="hidden" name="leadId" value={leadId} />
+          <div className="flex flex-wrap items-center gap-2">
+            <Select name="basis" defaultValue="" aria-label="İletişim dayanağı" className="h-8 w-60 text-xs" required>
+              <option value="" disabled>İletişim dayanağı seçin…</option>
+              <option value="B2B_TRADER_ADDRESS">Tacir kurumsal adresi</option>
+              <option value="EXISTING_RELATIONSHIP">Mevcut müşteri ilişkisi</option>
+              <option value="INBOUND_REQUEST">Firmadan gelen talep</option>
+              <option value="EXPLICIT_CONSENT">Açık onay alındı</option>
+            </Select>
+            <SubmitButton size="sm" variant="secondary" pendingText="Kaydediliyor…">İnceledim, kaydet</SubmitButton>
+          </div>
           <FormMessage state={state} />
         </>
       )}

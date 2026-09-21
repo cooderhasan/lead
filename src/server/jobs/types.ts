@@ -16,6 +16,12 @@ export interface JobPayloads {
   "lead.enrich": { leadId: string; usageId?: string };
   /** Toplu puanlama (araştırma yapmadan, mevcut veriyle) */
   "lead.score": { leadIds: string[]; usageId?: string };
+  /** Kampanya stratejisi (AI) — sonuç PENDING, insan onayı bekler */
+  "campaign.strategy": { campaignId: string; usageId?: string };
+  /** Kampanya ilk temas mesajları (AI) — her mesaj PENDING_APPROVAL */
+  "campaign.generate_messages": { campaignId: string; leadIds: string[]; usageId?: string };
+  /** Onaylı mesajların gönderimi (günlük sınır, uyum ve engel kontrolü her mesajda tekrar yapılır) */
+  "campaign.send": { campaignId: string };
 }
 
 export type JobType = keyof JobPayloads;

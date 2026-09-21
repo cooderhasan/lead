@@ -8,6 +8,7 @@ const TABS = [
   { href: "/settings", label: "Genel" },
   { href: "/settings/team", label: "Ekip" },
   { href: "/settings/memory", label: "Şirket hafızası" },
+  { href: "/settings/email", label: "E-posta ve uyum" },
   { href: "/settings/usage", label: "Kullanım ve kredi" },
   { href: "/settings/integrations", label: "Entegrasyonlar" },
 ];

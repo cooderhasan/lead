@@ -49,7 +49,21 @@ const schema = z.object({
   APIFY_GOOGLE_MAPS_ACTOR: optionalString,
   /** Tek aramada en fazla kaç lead toplanır (kredi koruması) */
   LEAD_SEARCH_MAX: z.coerce.number().int().min(1).max(500).default(50),
-  EMAIL_PROVIDER: optionalString,
+  /** smtp | resend | brevo — boşsa e-posta gönderimi kapalı (mesaj üretimi ve onay çalışır) */
+  EMAIL_PROVIDER: z.preprocess(emptyToUndefined, z.enum(["smtp", "resend", "brevo"]).optional()),
+  SMTP_HOST: optionalString,
+  SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
+  SMTP_SECURE: z.preprocess(emptyToUndefined, z.enum(["true", "false"]).default("false")).transform((v) => v === "true"),
+  SMTP_USER: optionalString,
+  SMTP_PASS: optionalString,
+  RESEND_API_KEY: optionalString,
+  BREVO_API_KEY: optionalString,
+  /** Şirket başına günlük en fazla gönderim (itibar / spam koruması) */
+  EMAIL_DAILY_LIMIT: z.coerce.number().int().min(1).max(5000).default(50),
+  /** Ret (unsubscribe) bağlantılarının imza anahtarı. Production'da zorunlu. */
+  UNSUBSCRIBE_SECRET: optionalString,
+  /** E-posta sağlayıcı webhook'ları için paylaşılan gizli anahtar (?token=…) */
+  EMAIL_WEBHOOK_SECRET: optionalString,
 });
 
 export type Env = z.infer<typeof schema>;
