@@ -47,6 +47,22 @@ describe("robots.txt", () => {
   it("Disallow: / tüm siteyi engeller", () => {
     expect(isAllowedByRobots("/", parseRobots("User-agent: *\nDisallow: /", "x"))).toBe(false);
   });
+  it("joker karakterli kural tüm siteyi engellemez", () => {
+    const rules = parseRobots("User-agent: *\nDisallow: /*?\nDisallow: /*.pdf$\nDisallow: /wp-admin/", "x");
+    expect(isAllowedByRobots("/", rules)).toBe(true);
+    expect(isAllowedByRobots("/urunler", rules)).toBe(true);
+    expect(isAllowedByRobots("/urunler?s=yay", rules)).toBe(false);
+    expect(isAllowedByRobots("/katalog.pdf", rules)).toBe(false);
+    expect(isAllowedByRobots("/katalog.pdf.html", rules)).toBe(true);
+    expect(isAllowedByRobots("/wp-admin/x", rules)).toBe(false);
+  });
+  it("Allow kuralı ve boş Disallow dikkate alınır", () => {
+    const rules = parseRobots("User-agent: *\nDisallow: /\nAllow: /$\nAllow: /hakkimizda", "x");
+    expect(isAllowedByRobots("/", rules)).toBe(true);
+    expect(isAllowedByRobots("/hakkimizda", rules)).toBe(true);
+    expect(isAllowedByRobots("/gizli", rules)).toBe(false);
+    expect(isAllowedByRobots("/x", parseRobots("User-agent: *\nDisallow:", "x"))).toBe(true);
+  });
 });
 
 describe("sayfa içeriği çıkarma", () => {

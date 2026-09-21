@@ -113,8 +113,10 @@ export async function safeFetch(
 
 // ── robots.txt ─────────────────────────────────────────────────────────
 
-export function parseRobots(txt: string, userAgent: string): string[] {
-  const disallow: Record<string, string[]> = {};
+export type RobotsRule = { allow: boolean; path: string };
+
+export function parseRobots(txt: string, userAgent: string): RobotsRule[] {
+  const rules: Record<string, RobotsRule[]> = {};
   let current: string[] = [];
   let lastWasAgent = false;
   for (const rawLine of txt.split(/\r?\n/)) {
@@ -126,23 +128,37 @@ export function parseRobots(txt: string, userAgent: string): string[] {
     if (key === "user-agent") {
       if (!lastWasAgent) current = [];
       current.push(value.toLowerCase());
-      disallow[value.toLowerCase()] ??= [];
+      rules[value.toLowerCase()] ??= [];
       lastWasAgent = true;
     } else {
       lastWasAgent = false;
-      if (key === "disallow" && value) for (const a of current) disallow[a]!.push(value);
+      // Boş "Disallow:" her şeye izin demektir → kural eklenmez
+      if ((key === "disallow" || key === "allow") && value) for (const a of current) rules[a]!.push({ allow: key === "allow", path: value });
     }
   }
   const ua = userAgent.toLowerCase().split("/")[0]!;
-  const specific = Object.keys(disallow).find((a) => a !== "*" && ua.includes(a));
-  return disallow[specific ?? "*"] ?? [];
+  const specific = Object.keys(rules).find((a) => a !== "*" && ua.includes(a));
+  return rules[specific ?? "*"] ?? [];
 }
 
-export function isAllowedByRobots(pathname: string, disallowed: string[]): boolean {
-  return !disallowed.some((rule) => {
-    const prefix = rule.replace(/\*.*$/, "").replace(/\$$/, "");
-    return prefix === "/" ? true : pathname.startsWith(prefix);
-  });
+function robotsRuleMatches(path: string, rule: string): boolean {
+  // "*" herhangi bir dizi, sondaki "$" satır sonu (Google / RFC 9309 yorumu)
+  const anchored = rule.endsWith("$");
+  const body = (anchored ? rule.slice(0, -1) : rule).split("*").map((p) => p.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*");
+  return new RegExp(`^${body}${anchored ? "$" : ""}`).test(path);
+}
+
+/**
+ * En uzun eşleşen kural kazanır; eşitlikte Allow üstündür (RFC 9309).
+ * `path` yol + sorgu dizesidir (ör. "/urunler?sayfa=2").
+ */
+export function isAllowedByRobots(path: string, rules: RobotsRule[]): boolean {
+  let best: RobotsRule | undefined;
+  for (const r of rules) {
+    if (!robotsRuleMatches(path, r.path)) continue;
+    if (!best || r.path.length > best.path.length || (r.path.length === best.path.length && r.allow)) best = r;
+  }
+  return best ? best.allow : true;
 }
 
 // ── İçerik çıkarma ─────────────────────────────────────────────────────
@@ -247,14 +263,14 @@ export async function crawlSite(input: string, opts: FetchOptions & { maxPages?:
   const start = normalizeUrl(input);
   const skipped: CrawlResult["skipped"] = [];
 
-  let disallowed: string[] = [];
+  let disallowed: RobotsRule[] = [];
   try {
     const robots = await safeFetch(new URL("/robots.txt", start), { ...opts, timeoutMs: 6_000 });
     if (robots.status === 200) disallowed = parseRobots(robots.body, USER_AGENT);
   } catch {
     /* robots.txt yoksa devam */
   }
-  if (!isAllowedByRobots(start.pathname, disallowed)) {
+  if (!isAllowedByRobots(start.pathname + start.search, disallowed)) {
     throw new FetchBlockedError("Sitenin robots.txt dosyası analize izin vermiyor.");
   }
 
@@ -268,7 +284,7 @@ export async function crawlSite(input: string, opts: FetchOptions & { maxPages?:
   for (const link of rankLinks(homePage.links, home.finalUrl)) {
     if (pages.length >= maxPages) break;
     const u = new URL(link);
-    if (!isAllowedByRobots(u.pathname, disallowed)) {
+    if (!isAllowedByRobots(u.pathname + u.search, disallowed)) {
       skipped.push({ url: link, reason: "robots.txt" });
       continue;
     }
