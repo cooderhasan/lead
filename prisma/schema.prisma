@@ -433,6 +433,8 @@ model Company {
   subscription       Subscription?
   integrations       Integration[]
   jobs               Job[]
+  apiKeys            ApiKey[]
+  webhookEndpoints   WebhookEndpoint[]
 }
 
 model CompanyMember {
@@ -535,24 +537,24 @@ model CompanyMemory {
 
 /// Hedef müşteri tanımı. isExcluded=true → istenmeyen müşteri profili.
 model TargetMarket {
-  id                  String   @id @default(cuid())
-  companyId           String
-  name                String
-  isExcluded          Boolean  @default(false)
-  businessModel       String?
-  industries          String[]
-  subIndustries       String[]
-  countries           String[]
-  cities              String[]
-  minEmployees        Int?
-  maxEmployees        Int?
-  minRevenue          Decimal? @db.Decimal(16, 2)
-  customerTypes       String[]
-  decisionMakerRoles  String[]
-  priority            Int      @default(0)
-  notes               String?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                 String   @id @default(cuid())
+  companyId          String
+  name               String
+  isExcluded         Boolean  @default(false)
+  businessModel      String?
+  industries         String[]
+  subIndustries      String[]
+  countries          String[]
+  cities             String[]
+  minEmployees       Int?
+  maxEmployees       Int?
+  minRevenue         Decimal? @db.Decimal(16, 2)
+  customerTypes      String[]
+  decisionMakerRoles String[]
+  priority           Int      @default(0)
+  notes              String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   campaigns Campaign[]
@@ -679,20 +681,20 @@ model KnowledgeChunk {
 
 /// Web sitesi / URL analizi geçmişi. Kendi şirketi (onboarding), lead veya rakip için kullanılır.
 model WebsiteAnalysis {
-  id           String         @id @default(cuid())
-  companyId    String
-  target       AnalysisTarget @default(OWN_COMPANY)
-  targetId     String?
-  url          String
-  status       AnalysisStatus @default(QUEUED)
-  pages        Json?
-  result       Json?
-  summary      String?
-  error        String?
-  jobId        String?
-  createdById  String?
-  createdAt    DateTime       @default(now())
-  completedAt  DateTime?
+  id          String         @id @default(cuid())
+  companyId   String
+  target      AnalysisTarget @default(OWN_COMPANY)
+  targetId    String?
+  url         String
+  status      AnalysisStatus @default(QUEUED)
+  pages       Json?
+  result      Json?
+  summary     String?
+  error       String?
+  jobId       String?
+  createdById String?
+  createdAt   DateTime       @default(now())
+  completedAt DateTime?
 
   company Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
   facts   CompanyFact[]
@@ -1381,4 +1383,47 @@ model Job {
 
   @@index([companyId, type, createdAt])
   @@index([status, createdAt])
+}
+
+// ── Faz 5: dış entegrasyonlar ─────────────────────────────────────────
+
+/// REST API anahtarı. Anahtarın kendisi saklanmaz; yalnızca SHA-256 özeti ve görünen öneki.
+model ApiKey {
+  id          String    @id @default(cuid())
+  companyId   String
+  name        String
+  /// Ekranda gösterilen önek, ör. "sos_live_ab12cd"
+  prefix      String
+  keyHash     String    @unique
+  /// "read" | "write"
+  scopes      String[]
+  createdById String
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+}
+
+/// Giden webhook (Zapier / Make / n8n / kendi sisteminiz). İstekler HMAC ile imzalanır.
+model WebhookEndpoint {
+  id              String    @id @default(cuid())
+  companyId       String
+  url             String
+  secretEncrypted String
+  events          String[]
+  active          Boolean   @default(true)
+  lastStatus      Int?
+  lastError       String?
+  lastDeliveredAt DateTime?
+  failureCount    Int       @default(0)
+  createdById     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, active])
 }

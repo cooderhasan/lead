@@ -30,6 +30,8 @@ services:
       - UNSUBSCRIBE_SECRET=${SERVICE_PASSWORD_64_UNSUBSCRIBE}
       - EMAIL_WEBHOOK_SECRET=${SERVICE_PASSWORD_64_EMAILWEBHOOK}
       - SCHEDULER_ENABLED=${SCHEDULER_ENABLED:-true}
+      # Şirket gizli anahtarlarını (WhatsApp erişim anahtarı, webhook sırları) şifreler — değiştirilirse kayıtlı anahtarlar yeniden girilmeli
+      - ENCRYPTION_KEY=${SERVICE_PASSWORD_64_ENCRYPTION}
       - QUEUE_DRIVER=inline
       - STORAGE_DRIVER=local
       - STORAGE_LOCAL_DIR=/app/storage

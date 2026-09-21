@@ -29,6 +29,10 @@ Alan adı panelinde (aktifyay.com.tr) bir **A kaydı** ekleyin:
    - **Gelen yanıtlar (Faz 4)**: sağlayıcının gelen kutusu yönlendirmesini (Brevo → Inbound Parsing) şu adrese ayarlayın:
      `https://lead.aktifyay.com.tr/api/webhooks/email/inbound?token=<SERVICE_PASSWORD_64_EMAILWEBHOOK değeri>`.
      Webhook kurmadan da lead sayfasından yanıtı elle ekleyebilirsiniz; AI sınıflandırma ve görev/fırsat oluşturma aynı çalışır.
+   - **WhatsApp Business (Faz 5)**: Uygulamada Ayarlar → WhatsApp ekranından Meta bilgilerini girin; ekrandaki Callback URL ve
+     Verify token'ı Meta for Developers → WhatsApp → Configuration → Webhook'a yazın. Anahtarlar `ENCRYPTION_KEY` ile şifrelenir
+     (Coolify otomatik üretir; **değiştirmeyin**, değişirse kayıtlı anahtarları yeniden girmeniz gerekir).
+   - **REST API ve webhook (Faz 5)**: Ayarlar → API ve webhook. API adresi `https://lead.aktifyay.com.tr/api/v1`.
    - Hatırlatmalar: uygulama içi zamanlayıcı her 15 dakikada vakti gelen hatırlatmaların taslağını hazırlar (`SCHEDULER_ENABLED=true`).
 5. **Deploy**. İlk açılışta tablolar ve Aktif Yay demo verisi otomatik kurulur (1–3 dk).
 

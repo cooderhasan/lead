@@ -5,6 +5,7 @@ export const NAV_ITEMS = [
   { href: "/leads", label: "Leads", icon: "Building2", phase: 1 },
   { href: "/campaigns", label: "Campaigns", icon: "Megaphone", phase: 1 },
   { href: "/pipeline", label: "Pipeline", icon: "KanbanSquare", phase: 1 },
+  { href: "/proposals", label: "Proposals", icon: "FileText", phase: 1 },
   { href: "/tasks", label: "Tasks", icon: "ListChecks", phase: 1 },
   { href: "/messages", label: "Messages", icon: "Mail", phase: 1 },
   { href: "/company", label: "Şirketim", icon: "Factory", phase: 1 },

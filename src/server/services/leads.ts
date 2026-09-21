@@ -13,6 +13,7 @@ import {
   normalizePhone,
 } from "@/lib/lead-normalize";
 import type { RawLead } from "@/server/providers/lead-source/types";
+import { emitEvent } from "./integrations";
 
 export const LEAD_STATUS_LABELS: Record<LeadStatus, string> = {
   NEW: "Yeni",
@@ -263,6 +264,10 @@ export async function saveDiscoveredLeads(
       leadIds: result.leadIds.slice(0, 50),
     },
   });
+  // Toplu ekleme tek olay olarak yayınlanır (tek tek elle eklemede "lead.created" ayrıca yayınlanır)
+  if (result.created > 0 && opts.provider !== "manual") {
+    await emitEvent(companyId, "leads.imported", { source: opts.provider, created: result.created, merged: result.merged, leadIds: result.leadIds.slice(0, 100) });
+  }
   return result;
 }
 
@@ -310,6 +315,7 @@ export async function createManualLead(ctx: TenantContext, raw: RawLead) {
     entityType: "Lead",
     entityId: leadId,
   });
+  if (res.created > 0) await emitEvent(ctx.companyId, "lead.created", { leadId, companyName: raw.companyName });
   return { leadId, merged: res.merged > 0 };
 }
 

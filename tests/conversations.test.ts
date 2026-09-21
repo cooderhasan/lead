@@ -223,6 +223,7 @@ describe("gelen yanıtlar", () => {
     const none = await ingestInbound(parseInboundPayload({ from: "x@y.com", to: "kimse@yok.com", text: "Merhaba" }));
     expect(none).toEqual({ recorded: 0, unmatched: 1 });
     expect(await rawDb.conversationMessage.count({ where: { companyId: other.companyId } })).toBe(0);
+    await drainInlineJobs(); // kuyruğa alınan sınıflandırma bu testte bitsin (sonraki teste sızmasın)
   });
 
   it("elle yanıt: başka şirketin lead'ine eklenemez", async () => {

@@ -10,6 +10,7 @@ import { findSuppression, refreshLeadCompliance } from "./compliance";
 import { getSenderSettings, type SenderSettings } from "./email-settings";
 import { oneClickUnsubscribeUrl, unsubscribeUrl } from "./unsubscribe";
 import { scheduleFollowUpsAfterSend } from "./followups";
+import { deliverWhatsApp } from "./whatsapp";
 
 const CONTACTED_FROM = ["NEW", "RESEARCHING", "QUALIFIED", "CONTACT_READY"] as const;
 const THROTTLE_MS = () => (process.env.NODE_ENV === "test" ? 0 : 1500);
@@ -175,7 +176,7 @@ async function deliveryContext(companyId: string): Promise<DeliveryContext> {
 }
 
 async function remainingQuota(companyId: string) {
-  const sentToday = await tenantDb({ companyId }).message.count({ where: { direction: "OUTBOUND", sentAt: { gte: startOfToday() } } });
+  const sentToday = await tenantDb({ companyId }).message.count({ where: { direction: "OUTBOUND", channel: "EMAIL", sentAt: { gte: startOfToday() } } });
   return Math.max(0, env().EMAIL_DAILY_LIMIT - sentToday);
 }
 
@@ -241,6 +242,7 @@ export async function sendSingleApprovedMessage(companyId: string, messageId: st
   const db = tenantDb({ companyId });
   const msg = await db.message.findUnique({ where: { id: messageId } });
   if (!msg || msg.status !== "APPROVED") return "busy";
+  if (msg.channel === "WHATSAPP") return deliverWhatsApp(companyId, msg);
   if ((await remainingQuota(companyId)) <= 0) {
     await db.message.update({ where: { id: msg.id }, data: { error: "Günlük gönderim sınırı doldu; yarın tekrar deneyin." } });
     return "skipped";

@@ -49,6 +49,8 @@ export const TENANT_MODELS = new Set<Prisma.ModelName>([
   "Subscription",
   "Integration",
   "Job",
+  "ApiKey",
+  "WebhookEndpoint",
 ]);
 
 /** Tenant bağlamında hiç erişilmemesi gereken modeller (kimlik tabloları). */

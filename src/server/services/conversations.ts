@@ -25,6 +25,7 @@ import { cancelFollowUpsForLead } from "./followups";
 import { buildVerifiedCompanyContext } from "./facts";
 import { getSenderSettings } from "./email-settings";
 import { checkMessageQuality } from "./message-quality";
+import { emitEvent } from "./integrations";
 
 export const REPLY_CATEGORY_LABELS: Record<ReplyCategory, string> = {
   INTERESTED: "İlgileniyor",
@@ -270,11 +271,20 @@ export async function applyCategory(companyId: string, conversationMessageId: st
   });
   await db.conversation.update({ where: { id: cm.conversationId }, data: { category: c.category } });
   const leadId = cm.conversation.leadId;
+  await emitEvent(companyId, "reply.received", {
+    leadId,
+    conversationId: cm.conversationId,
+    category: c.category,
+    confidence: c.confidence,
+    summary: c.summary,
+  });
   const description = [c.summary, c.request ? `Talep: ${c.request}` : null].filter(Boolean).join("\n");
 
   if (c.category === "UNSUBSCRIBE") {
     if (cm.fromAddress) {
-      await addSuppression(companyId, { type: "EMAIL", value: cm.fromAddress, source: "REPLY", reason: "Alıcı yanıtında ret bildirdi.", leadId });
+      // Kanal bağımsız: e-posta adresi veya (WhatsApp) telefon numarası
+      const type = cm.fromAddress.includes("@") ? "EMAIL" : "PHONE";
+      await addSuppression(companyId, { type, value: cm.fromAddress, source: "REPLY", reason: "Alıcı yanıtında ret bildirdi.", leadId });
     }
     return;
   }

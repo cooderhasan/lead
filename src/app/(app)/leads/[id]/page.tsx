@@ -19,7 +19,9 @@ import { listConversations, REPLY_CATEGORY_LABELS } from "@/server/services/conv
 import { FOLLOWUP_STATUS_LABELS, listFollowUps } from "@/server/services/followups";
 import { cancelFollowUpAction } from "@/app/actions/conversations";
 import { createOpportunityAction } from "@/app/actions/crm";
+import { startProposalAction } from "@/app/actions/proposals";
 import { getLeadCrm, STAGE_LABELS } from "@/server/services/crm";
+import { isWhatsAppActive } from "@/server/services/whatsapp";
 import { ActionButton } from "@/components/action-button";
 import { formatMoney } from "@/lib/cn";
 import { ComplianceReviewForm, ManualReplyForm, ResearchLeadButton, ScoreLeadsButton } from "../lead-forms";
@@ -89,6 +91,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     listFollowUps(ctx, { leadId: id }),
     getLeadCrm(ctx, id),
   ]);
+  const waActive = await isWhatsAppActive(ctx.companyId);
   const canReview = can(ctx, "compliance.review");
   const canWrite = can(ctx, "lead.write");
   const aiReady = isAIConfigured();
@@ -395,13 +398,26 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                   </Badge>
                   <span className="ml-2 text-text-2">{crm.opportunity.value ? formatMoney(Number(crm.opportunity.value)) : "Tutar girilmedi"}</span>
                 </p>
-              ) : canWrite ? (
-                <ActionButton action={createOpportunityAction} fields={{ leadId: lead.id }} variant="secondary">
-                  Fırsat oluştur
-                </ActionButton>
-              ) : (
-                <p className="text-text-3">Fırsat yok.</p>
-              )}
+              ) : null}
+              {(() => {
+                const open = crm.opportunity && !["WON", "LOST"].includes(crm.opportunity.stage) ? crm.opportunity : null;
+                if (open && canWrite) {
+                  return (
+                    <ActionButton action={startProposalAction} fields={{ opportunityId: open.id }} variant="secondary" pendingText="Açılıyor…">
+                      Teklif hazırla (5 kredi)
+                    </ActionButton>
+                  );
+                }
+                // Açık fırsat yoksa (hiç yok veya kapanmış) yeni fırsat açılabilir
+                if (!open && canWrite) {
+                  return (
+                    <ActionButton action={createOpportunityAction} fields={{ leadId: lead.id }} variant="secondary">
+                      Fırsat oluştur
+                    </ActionButton>
+                  );
+                }
+                return crm.opportunity ? null : <p className="text-text-3">Fırsat yok.</p>;
+              })()}
               {crm.tasks.length > 0 && (
                 <ul className="space-y-1">
                   {crm.tasks.map((t) => (
@@ -459,6 +475,9 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                       <Badge>{c.type === "PERSONAL" ? "Kişisel" : "Kurumsal"}</Badge>
                       {c.communicationBasis === "NONE" && <Badge tone="warning">Dayanak yok</Badge>}
                       {c.optOut && <Badge tone="danger">İletişim istemiyor</Badge>}
+                      {waActive && c.phone && !c.optOut && can(ctx, "whatsapp.template") && (
+                        <Link href={`/leads/${lead.id}/whatsapp?contactId=${c.id}`} className="text-xs text-accent-text">WhatsApp şablonu</Link>
+                      )}
                     </div>
                   </li>
                 ))}

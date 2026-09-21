@@ -19,7 +19,8 @@ export default async function IntegrationsPage() {
     { name: "Apify (lead kaynakları)", detail: e.APIFY_TOKEN ? "Token tanımlı" : "Token yok — CSV ve elle ekleme çalışır", status: e.APIFY_TOKEN ? "ok" : "off" },
     { name: "E-posta sağlayıcı", detail: e.EMAIL_PROVIDER ? `${e.EMAIL_PROVIDER} · günlük sınır ${e.EMAIL_DAILY_LIMIT}` : "Tanımlı değil — gönderim kapalı", status: e.EMAIL_PROVIDER ? "ok" : "off", note: "SMTP / Resend / Brevo" },
     { name: "E-posta webhook'ları", detail: e.EMAIL_WEBHOOK_SECRET ? "Geri dönme / şikâyet takibi açık" : "Kapalı (EMAIL_WEBHOOK_SECRET)", status: e.EMAIL_WEBHOOK_SECRET ? "ok" : "off" },
-    { name: "WhatsApp Business API", detail: "Resmi API — şifre istenmez", status: "later", note: "Faz 5" },
+    { name: "WhatsApp Business API", detail: "Resmi Cloud API — Ayarlar → WhatsApp", status: e.ENCRYPTION_KEY ? "ok" : "off", note: e.ENCRYPTION_KEY ? undefined : "ENCRYPTION_KEY tanımlı değil" },
+    { name: "REST API ve webhook", detail: "Ayarlar → API ve webhook", status: "ok" },
     { name: "Ödeme", detail: "Stripe / iyzico / PayTR", status: "later", note: "Sonraki faz" },
   ];
 

@@ -4,6 +4,7 @@ import { tenantDb } from "@/server/tenancy/tenant-db";
 import { assertCan } from "@/server/tenancy/permissions";
 import type { TenantContext } from "@/server/tenancy/types";
 import { audit } from "@/server/audit/audit";
+import { emitEvent } from "./integrations";
 import { AppError } from "@/lib/errors";
 
 export const STAGE_LABELS: Record<OpportunityStage, string> = {
@@ -119,6 +120,9 @@ export async function updateOpportunity(ctx: TenantContext, input: OpportunityUp
     entityId: opp.id,
     metadata: { from: opp.stage, to: input.stage, lostReason: input.lostReason ?? null },
   });
+  if (opp.stage !== input.stage) {
+    await emitEvent(ctx.companyId, "opportunity.stage_changed", { opportunityId: opp.id, leadId: opp.leadId, from: opp.stage, to: input.stage, value: input.value ?? null });
+  }
 }
 
 /** Lead detay sayfası: açık fırsat + açık görevler */

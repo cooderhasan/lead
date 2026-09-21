@@ -11,7 +11,15 @@ import {
   onCampaignMessagesFailure,
   onCampaignStrategyFailure,
 } from "./campaign";
-import { classifyReplyJob, followUpRunJob, sendMessageJob } from "./conversation";
+import {
+  classifyReplyJob,
+  competitorScanJob,
+  followUpRunJob,
+  onProposalDraftFailure,
+  proposalDraftJob,
+  sendMessageJob,
+  webhookDeliverJob,
+} from "./conversation";
 
 type Registry = {
   [K in JobType]: {
@@ -33,4 +41,7 @@ export const handlers: Registry = {
   "conversation.classify": { run: classifyReplyJob },
   "message.send": { run: sendMessageJob },
   "followup.run": { run: followUpRunJob },
+  "proposal.draft": { run: proposalDraftJob, onFailure: onProposalDraftFailure },
+  "competitor.scan": { run: competitorScanJob },
+  "webhook.deliver": { run: webhookDeliverJob },
 };

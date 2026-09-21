@@ -14,6 +14,8 @@ import { isAppError } from "@/lib/errors";
 import { LEAD_STATUS_LABELS } from "@/server/services/leads";
 import { MessageCard } from "../../../campaigns/campaign-forms";
 import { toMessageCard } from "../../../campaigns/message-data";
+import { SESSION_WINDOW_MS } from "@/server/services/whatsapp";
+import { WhatsAppReplyForm } from "./whatsapp-forms";
 
 export const metadata: Metadata = { title: "Konuşma" };
 
@@ -49,6 +51,9 @@ export default async function ConversationPage({ params }: { params: Promise<{ i
   ].sort((a, b) => a.at.getTime() - b.at.getTime());
   const drafts = conv.outbound.filter((m) => ["PENDING_APPROVAL", "APPROVED", "SCHEDULED", "FAILED"].includes(m.status) && !m.campaignStepId);
   const hasOpenDraft = drafts.some((d) => d.status === "PENDING_APPROVAL" || d.status === "APPROVED");
+  // WhatsApp: müşterinin son mesajından beri geçen süreye göre kalan yanıt penceresi (saat)
+  const lastInbound = [...conv.messages].reverse().find((m) => m.direction === "INBOUND");
+  const waHoursLeft = lastInbound ? Math.floor((SESSION_WINDOW_MS - (Date.now() - lastInbound.receivedAt.getTime())) / 3600_000) : 0;
 
   return (
     <>
@@ -85,6 +90,25 @@ export default async function ConversationPage({ params }: { params: Promise<{ i
           </CardBody>
         </Card>
 
+        {conv.channel === "WHATSAPP" ? (
+          <Card>
+            <CardHeader title="WhatsApp yanıtı" description="Müşterinin son mesajından sonraki 24 saat içinde serbest metin gönderilebilir (Meta kuralı)." />
+            <CardBody className="flex flex-col gap-3">
+              {unsubscribed ? (
+                <Alert tone="danger">Alıcı ret bildirdi; bu numaraya mesaj gönderilmez.</Alert>
+              ) : !can(ctx, "whatsapp.send") ? (
+                <p className="text-sm text-text-2">Yanıt gönderme yetkiniz yok.</p>
+              ) : waHoursLeft > 0 ? (
+                <WhatsAppReplyForm conversationId={conv.id} hoursLeft={waHoursLeft} />
+              ) : (
+                <Alert tone="warning">
+                  24 saatlik pencere kapandı. Yalnızca onaylı şablon gönderilebilir:{" "}
+                  <Link href={`/leads/${conv.lead.id}/whatsapp${conv.contactId ? `?contactId=${conv.contactId}` : ""}`} className="font-medium underline">şablon gönder</Link>
+                </Alert>
+              )}
+            </CardBody>
+          </Card>
+        ) : (
         <Card>
           <CardHeader
             title="Yanıtınız"
@@ -116,6 +140,7 @@ export default async function ConversationPage({ params }: { params: Promise<{ i
             ))}
           </CardBody>
         </Card>
+        )}
       </div>
     </>
   );

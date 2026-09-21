@@ -7,8 +7,9 @@ const SESSION_COOKIE = "sos_session";
  * - /u, /api/unsubscribe: imzalı ret anahtarı (alıcının oturumu yoktur — giriş sayfasına düşmemeli)
  * - /api/webhooks: paylaşılan gizli anahtar (e-posta sağlayıcısı çağırır)
  * - /api/cron: zamanlayıcı anahtarı
+ * - /api/v1: REST API anahtarı (Authorization: Bearer)
  */
-export const PUBLIC_PREFIXES = ["/login", "/register", "/u", "/api/unsubscribe", "/api/webhooks", "/api/cron"];
+export const PUBLIC_PREFIXES = ["/login", "/register", "/u", "/api/unsubscribe", "/api/webhooks", "/api/cron", "/api/v1"];
 
 export function isPublicPath(pathname: string): boolean {
   return pathname === "/" || PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));

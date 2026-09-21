@@ -251,6 +251,44 @@ export const taskCreateSchema = z.object({
   priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]).default("MEDIUM"),
 });
 
+/** Teklif kalemleri formdan dizi olarak gelir: item_name[], item_qty[], item_unit[], item_price[], item_note[], item_productId[] */
+const arr = (v: unknown) => (v === undefined ? [] : Array.isArray(v) ? v : [v]);
+export const proposalFormSchema = z
+  .object({
+    id: z.string().min(1),
+    currency: z.enum(["TRY", "USD", "EUR"]).default("TRY"),
+    validUntil: optDate,
+    deliveryTerms: optText(600),
+    terms: optText(2000),
+    item_name: z.preprocess(arr, z.array(z.string().max(200))),
+    item_qty: z.preprocess(arr, z.array(z.string().max(30))),
+    item_unit: z.preprocess(arr, z.array(z.string().max(30))),
+    item_price: z.preprocess(arr, z.array(z.string().max(30))),
+    item_note: z.preprocess(arr, z.array(z.string().max(400))),
+    item_productId: z.preprocess(arr, z.array(z.string().max(40))),
+  })
+  .transform((v) => ({
+    id: v.id,
+    currency: v.currency,
+    validUntil: v.validUntil ?? null,
+    deliveryTerms: v.deliveryTerms ?? null,
+    terms: v.terms ?? null,
+    items: v.item_name
+      .map((name, i) => {
+        const qty = v.item_qty[i]?.trim() ? parseMoney(v.item_qty[i]!) : NaN;
+        const price = v.item_price[i]?.trim() ? parseMoney(v.item_price[i]!) : NaN;
+        return {
+          productId: v.item_productId[i]?.trim() || null,
+          name: name.trim(),
+          quantity: Number.isFinite(qty) && qty > 0 ? qty : null,
+          unit: v.item_unit[i]?.trim() || null,
+          unitPrice: Number.isFinite(price) && price >= 0 ? price : null,
+          note: v.item_note[i]?.trim() || null,
+        };
+      })
+      .filter((i) => i.name.length > 0),
+  }));
+
 export const messageEditSchema = z.object({
   id: z.string().min(1),
   subject: z.string().trim().min(3, "Konu gerekli").max(150),

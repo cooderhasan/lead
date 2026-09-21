@@ -35,6 +35,13 @@ export const PERMISSIONS = {
   "suppression.manage": "ADMIN",
   "email.settings": "ADMIN",
   "email.send": "ADMIN",
+  // Faz 5 — WhatsApp ve entegrasyonlar
+  "whatsapp.settings": "ADMIN",
+  /** Müşterinin yazdığı konuşmaya 24 saat içinde yanıt */
+  "whatsapp.send": "MEMBER",
+  /** İşletmenin başlattığı şablon mesaj (izin gerekir) */
+  "whatsapp.template": "ADMIN",
+  "integrations.manage": "ADMIN",
 } as const satisfies Record<string, MemberRole>;
 
 export type Permission = keyof typeof PERMISSIONS;

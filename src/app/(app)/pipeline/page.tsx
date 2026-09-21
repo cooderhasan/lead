@@ -8,6 +8,8 @@ import { decimalToNumber } from "@/server/services/company";
 import { Badge, Card, EmptyState, PageHeader, Stat, CardBody } from "@/components/ui";
 import { formatMoney } from "@/lib/cn";
 import { OpportunityForm } from "./crm-forms";
+import { ActionButton } from "@/components/action-button";
+import { startProposalAction } from "@/app/actions/proposals";
 
 export const metadata: Metadata = { title: "Pipeline" };
 
@@ -64,6 +66,13 @@ export default async function PipelinePage() {
                       </p>
                       {o._count.tasks > 0 && <p className="mt-1 text-xs text-warning">{o._count.tasks} açık görev</p>}
                       {o.stage === "LOST" && o.lostReason && <p className="mt-1 text-xs text-text-3">{LOST_REASON_LABELS[o.lostReason]}</p>}
+                      {canWrite && (o.stage === "INTERESTED" || o.stage === "QUOTE" || o.stage === "NEGOTIATION") && (
+                        <div className="mt-2">
+                          <ActionButton action={startProposalAction} fields={{ opportunityId: o.id }} variant="secondary" pendingText="Açılıyor…">
+                            Teklif hazırla
+                          </ActionButton>
+                        </div>
+                      )}
                       {canWrite && (
                         <details className="mt-2">
                           <summary className="cursor-pointer text-xs text-accent-text">Düzenle</summary>

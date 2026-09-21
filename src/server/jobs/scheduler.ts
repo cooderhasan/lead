@@ -30,5 +30,34 @@ export async function runSchedulerTick(now = new Date()) {
     await enqueue("followup.run", {}, { companyId, maxAttempts: 2 });
     enqueued++;
   }
-  return { companies: due.length, enqueued };
+  const competitorScans = await scheduleCompetitorScans();
+  return { companies: due.length, enqueued, competitorScans };
+}
+
+const WEEK_MS = 7 * 86_400_000;
+const MAX_COMPETITOR_SCANS_PER_TICK = 20;
+
+/**
+ * İzlemesi açık rakipler haftada bir taranır. Son 7 günde bu rakip için iş açıldıysa
+ * (başarılı, başarısız veya kredi yetersizliğinden atlanmış) tekrar kuyruğa alınmaz.
+ */
+async function scheduleCompetitorScans() {
+  const since = new Date(Date.now() - WEEK_MS);
+  const candidates = await rawDb.competitor.findMany({
+    where: { monitoring: true, website: { not: null } },
+    select: { id: true, companyId: true },
+    take: 500,
+  });
+  let enqueued = 0;
+  for (const c of candidates) {
+    if (enqueued >= MAX_COMPETITOR_SCANS_PER_TICK) break;
+    const recent = await rawDb.job.findFirst({
+      where: { companyId: c.companyId, type: "competitor.scan", createdAt: { gte: since }, payload: { path: ["competitorId"], equals: c.id } },
+      select: { id: true },
+    });
+    if (recent) continue;
+    await enqueue("competitor.scan", { competitorId: c.id }, { companyId: c.companyId, maxAttempts: 2 });
+    enqueued++;
+  }
+  return enqueued;
 }

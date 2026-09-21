@@ -8,6 +8,7 @@ import {
   Building2,
   Factory,
   FileBarChart,
+  FileText,
   KanbanSquare,
   LayoutDashboard,
   LineChart,
@@ -27,6 +28,7 @@ import { NAV_ITEMS, type NavIcon } from "./nav";
 import { cn } from "@/lib/cn";
 
 const ICONS: Record<NavIcon, LucideIcon> = {
+  FileText,
   LayoutDashboard,
   Sparkles,
   Building2,

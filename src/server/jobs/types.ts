@@ -28,6 +28,12 @@ export interface JobPayloads {
   "message.send": { messageId: string };
   /** Şirketin vakti gelmiş hatırlatmaları (zamanlayıcı tetikler) */
   "followup.run": Record<string, never>;
+  /** Teklif taslağı (AI) — fiyatlar boş kalır, insan girer */
+  "proposal.draft": { proposalId: string; usageId?: string };
+  /** Rakip sitesi taraması. usageId yoksa (zamanlayıcı) kredi işte düşülür; yetersizse atlanır. */
+  "competitor.scan": { competitorId: string; usageId?: string };
+  /** Giden webhook teslimi (HMAC imzalı; başarısızlıkta tekrar denenir) */
+  "webhook.deliver": { endpointId: string; eventId: string; event: string; data: unknown };
 }
 
 export type JobType = keyof JobPayloads;
