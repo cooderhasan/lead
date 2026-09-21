@@ -32,6 +32,13 @@ services:
       - EMAIL_DAILY_LIMIT=${EMAIL_DAILY_LIMIT:-50}
       - UNSUBSCRIBE_SECRET=${SERVICE_PASSWORD_64_UNSUBSCRIBE}
       - EMAIL_WEBHOOK_SECRET=${SERVICE_PASSWORD_64_EMAILWEBHOOK}
+      # Gelen yanıtlar (IMAP, salt okunur): boşsa kapalı
+      - IMAP_HOST=${IMAP_HOST:-}
+      - IMAP_PORT=${IMAP_PORT:-993}
+      - IMAP_SECURE=${IMAP_SECURE:-true}
+      - IMAP_USER=${IMAP_USER:-}
+      - IMAP_PASS=${IMAP_PASS:-}
+      - IMAP_MAILBOX=${IMAP_MAILBOX:-INBOX}
       - SCHEDULER_ENABLED=${SCHEDULER_ENABLED:-true}
       # Şirket gizli anahtarlarını (WhatsApp erişim anahtarı, webhook sırları) şifreler — değiştirilirse kayıtlı anahtarlar yeniden girilmeli
       - ENCRYPTION_KEY=${SERVICE_PASSWORD_64_ENCRYPTION}

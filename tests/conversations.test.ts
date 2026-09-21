@@ -217,11 +217,11 @@ describe("gelen yanıtlar", () => {
     const res = await ingestInbound(
       parseInboundPayload({ items: [{ From: { Address: "info@alici.com" }, To: [{ Address: "ahmet@aktifyay.com.tr" }], RawTextBody: "İlgileniyoruz", InReplyTo: `<${sent.id}@aktifyay.com.tr>` }] }),
     );
-    expect(res).toEqual({ recorded: 1, unmatched: 0 });
+    expect(res).toEqual({ recorded: 1, unmatched: 0, duplicates: 0 });
     expect(await rawDb.conversationMessage.count({ where: { companyId: a.companyId } })).toBe(1);
 
     const none = await ingestInbound(parseInboundPayload({ from: "x@y.com", to: "kimse@yok.com", text: "Merhaba" }));
-    expect(none).toEqual({ recorded: 0, unmatched: 1 });
+    expect(none).toEqual({ recorded: 0, unmatched: 1, duplicates: 0 });
     expect(await rawDb.conversationMessage.count({ where: { companyId: other.companyId } })).toBe(0);
     await drainInlineJobs(); // kuyruğa alınan sınıflandırma bu testte bitsin (sonraki teste sızmasın)
   });

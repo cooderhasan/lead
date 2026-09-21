@@ -1034,11 +1034,25 @@ model ConversationMessage {
   categoryConfidence Float?
   aiSummary          String?
   receivedAt         DateTime         @default(now())
+  /// Gelen e-postanın Message-ID başlığı — aynı yanıt (IMAP / webhook tekrarı) iki kez kaydedilmez
+  externalId         String?
 
   company      Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
+  @@unique([companyId, externalId])
   @@index([companyId, conversationId, receivedAt])
+}
+
+/// IMAP posta kutusu okuma imleci (platform düzeyi, şirkete ait değil). Son işlenen UID burada tutulur;
+/// posta kutusundaki iletilere dokunulmaz (okundu işareti konmaz).
+model MailboxCursor {
+  id          String   @id
+  uidValidity BigInt
+  lastUid     Int
+  lastPollAt  DateTime?
+  lastError   String?
+  updatedAt   DateTime @updatedAt
 }
 
 // ─────────────────────────────────────────────────────────────

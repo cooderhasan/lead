@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { requireTenantPage } from "@/server/tenancy/context";
 import { env } from "@/server/env";
 import { getEmbeddingProvider, isAIConfigured } from "@/server/ai";
+import { mailboxStatus } from "@/server/jobs/imap-poll";
 import { Badge, Card, CardHeader } from "@/components/ui";
 
 export const metadata: Metadata = { title: "Entegrasyonlar" };
@@ -10,6 +11,14 @@ export default async function IntegrationsPage() {
   await requireTenantPage();
   const e = env();
   const embedding = getEmbeddingProvider();
+  const mailbox = await mailboxStatus();
+  const imapDetail = !e.IMAP_HOST
+    ? "Kapalı — yanıtları konuşma ekranından elle ekleyin"
+    : mailbox?.lastError
+      ? `Son okuma başarısız: ${mailbox.lastError}`
+      : mailbox?.lastPollAt
+        ? `${e.IMAP_USER} · son kontrol ${mailbox.lastPollAt.toLocaleString("tr-TR", { timeZone: "Europe/Istanbul" })}`
+        : `${e.IMAP_USER} · henüz kontrol edilmedi (5 dk içinde)`;
 
   const rows: Array<{ name: string; detail: string; status: "ok" | "off" | "later"; note?: string }> = [
     { name: "AI sağlayıcı", detail: `${e.AI_PROVIDER}${e.AI_MODEL ? ` · ${e.AI_MODEL}` : ""}`, status: isAIConfigured() ? "ok" : "off", note: e.AI_FALLBACK_PROVIDER ? `Yedek: ${e.AI_FALLBACK_PROVIDER}` : undefined },
@@ -18,6 +27,7 @@ export default async function IntegrationsPage() {
     { name: "Dosya depolama", detail: e.STORAGE_DRIVER === "s3" ? `S3 · ${e.S3_BUCKET}` : "Yerel disk", status: "ok" },
     { name: "Apify (lead kaynakları)", detail: e.APIFY_TOKEN ? "Token tanımlı" : "Token yok — CSV ve elle ekleme çalışır", status: e.APIFY_TOKEN ? "ok" : "off" },
     { name: "E-posta sağlayıcı", detail: e.EMAIL_PROVIDER ? `${e.EMAIL_PROVIDER} · günlük sınır ${e.EMAIL_DAILY_LIMIT}` : "Tanımlı değil — gönderim kapalı", status: e.EMAIL_PROVIDER ? "ok" : "off", note: "SMTP / Resend / Brevo" },
+    { name: "Gelen yanıtlar (IMAP)", detail: imapDetail, status: e.IMAP_HOST && !mailbox?.lastError ? "ok" : "off", note: e.IMAP_HOST ? "Salt okunur" : undefined },
     { name: "E-posta webhook'ları", detail: e.EMAIL_WEBHOOK_SECRET ? "Geri dönme / şikâyet takibi açık" : "Kapalı (EMAIL_WEBHOOK_SECRET)", status: e.EMAIL_WEBHOOK_SECRET ? "ok" : "off" },
     { name: "WhatsApp Business API", detail: "Resmi Cloud API — Ayarlar → WhatsApp", status: e.ENCRYPTION_KEY ? "ok" : "off", note: e.ENCRYPTION_KEY ? undefined : "ENCRYPTION_KEY tanımlı değil" },
     { name: "REST API ve webhook", detail: "Ayarlar → API ve webhook", status: "ok" },

@@ -77,14 +77,24 @@ export interface InboundReply {
   receivedAt?: Date;
   /** Elle eklemede kullanıcı lead'i seçer */
   leadId?: string | null;
+  /** Gelen e-postanın Message-ID'si — aynı ileti ikinci kez gelirse (IMAP / webhook tekrarı) kaydedilmez */
+  externalId?: string | null;
 }
 
 /**
  * Gelen yanıtı kaydeder: ilgili giden iletiyi ve lead'i bulur, konuşmaya ekler, hatırlatmaları iptal eder,
  * açık ret ifadesi varsa hemen engel listesine ekler ve AI sınıflandırmasını kuyruğa alır.
  */
-export async function recordInboundReply(companyId: string, input: InboundReply, actor: { userId?: string | null; source: "webhook" | "manual" }) {
+export async function recordInboundReply(companyId: string, input: InboundReply, actor: { userId?: string | null; source: "webhook" | "imap" | "manual" }) {
   const db = tenantDb({ companyId });
+  const externalId = input.externalId?.replace(/[<>]/g, "").trim().slice(0, 500) || null;
+  if (externalId) {
+    const dup = await db.conversationMessage.findFirst({
+      where: { externalId },
+      select: { id: true, conversationId: true, conversation: { select: { leadId: true } } },
+    });
+    if (dup) return { matched: true as const, duplicate: true, leadId: dup.conversation.leadId, conversationId: dup.conversationId, conversationMessageId: dup.id };
+  }
   const from = normalizeEmail(input.fromAddress);
   if (!from) throw new AppError("VALIDATION", "Gönderen e-posta adresi geçersiz.", { fromAddress: "Geçersiz adres" });
   const body = input.body.slice(0, 50_000);
@@ -152,6 +162,7 @@ export async function recordInboundReply(companyId: string, input: InboundReply,
       subject: input.subject?.slice(0, 300) ?? null,
       body,
       receivedAt,
+      externalId,
     },
   });
   await db.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: receivedAt } });
@@ -180,7 +191,7 @@ export async function recordInboundReply(companyId: string, input: InboundReply,
     entityId: cm.id,
     metadata: { source: actor.source, matchedMessage: outbound?.id ?? null },
   });
-  return { matched: true as const, leadId, conversationId, conversationMessageId: cm.id };
+  return { matched: true as const, duplicate: false, leadId, conversationId, conversationMessageId: cm.id };
 }
 
 /** Elle yanıt ekleme (kullanıcı kendi posta kutusundaki yanıtı yapıştırır). */

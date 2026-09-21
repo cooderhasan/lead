@@ -1,6 +1,7 @@
 import "server-only";
 import { rawDb } from "@/server/db";
 import { enqueue } from "./queue";
+import { pollMailbox } from "./imap-poll";
 
 /** Aynı şirket için hatırlatma işi en fazla bu sıklıkta kuyruğa girer (kredi / AI yoksa boşa dönmesin). */
 const MIN_INTERVAL_MS = 30 * 60_000;
@@ -31,7 +32,8 @@ export async function runSchedulerTick(now = new Date()) {
     enqueued++;
   }
   const competitorScans = await scheduleCompetitorScans();
-  return { companies: due.length, enqueued, competitorScans };
+  const mailbox = await pollMailbox().catch((err: Error) => ({ skipped: true as const, reason: err.message.slice(0, 200) }));
+  return { companies: due.length, enqueued, competitorScans, mailbox };
 }
 
 const WEEK_MS = 7 * 86_400_000;

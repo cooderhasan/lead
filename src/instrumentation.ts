@@ -1,6 +1,6 @@
 /**
- * Sunucu açılışında bir kez çalışır. Hatırlatma zamanlayıcısını başlatır:
- * her 15 dakikada kendi /api/cron/tick uç noktasını süreç içi gizli anahtarla çağırır.
+ * Sunucu açılışında bir kez çalışır. Zamanlayıcıyı başlatır (hatırlatmalar, rakip taraması, gelen posta):
+ * her 5 dakikada kendi /api/cron/tick uç noktasını süreç içi gizli anahtarla çağırır.
  * (Route handler üzerinden çağrılır; böylece sunucu modülleri normal Next.js ortamında yüklenir.)
  *
  * SCHEDULER_ENABLED=false → kapalı (ör. birden fazla web kopyası varsa tek birinde açın veya dış cron kullanın).
@@ -12,7 +12,8 @@ export async function register() {
   // Web Crypto: bu dosya edge için de derlendiğinden node:crypto kullanılmaz
   if (!process.env.INTERNAL_CRON_TOKEN) process.env.INTERNAL_CRON_TOKEN = `${crypto.randomUUID()}${crypto.randomUUID()}`.replace(/-/g, "");
   const port = process.env.PORT ?? "3000";
-  const intervalMs = 15 * 60_000;
+  // Gelen yanıtlar birkaç dakikada görünsün; hatırlatma / rakip işlerinin kendi sıklık sınırları vardır
+  const intervalMs = 5 * 60_000;
 
   const tick = async () => {
     try {
@@ -31,5 +32,5 @@ export async function register() {
 
   setTimeout(() => void tick(), 60_000).unref();
   setInterval(() => void tick(), intervalMs).unref();
-  console.log("[scheduler] hatırlatma zamanlayıcısı açık (15 dk)");
+  console.log("[scheduler] zamanlayıcı açık (5 dk)");
 }

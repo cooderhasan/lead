@@ -1,6 +1,6 @@
 import "server-only";
 import { tenantDb } from "@/server/tenancy/tenant-db";
-import { findMessageOwner } from "@/server/tenancy/message-lookup";
+import { findMessageOwner, findOutboundByIds } from "@/server/tenancy/message-lookup";
 import { audit } from "@/server/audit/audit";
 import { addSuppression } from "./compliance";
 
@@ -61,6 +61,17 @@ export async function applyEmailEvent(event: EmailEvent): Promise<boolean> {
   if (event.type === "ignored") return false;
   const owner = await findMessageOwner(event.providerMessageId);
   if (!owner) return false;
+  return applyEventToMessage(owner, event);
+}
+
+/** Geri dönen e-postadaki kimliklerden giden iletiyi bulup geri dönmeyi işler (IMAP). */
+export async function applyBounceByIds(ids: string[], permanent: boolean): Promise<boolean> {
+  const owner = await findOutboundByIds(ids);
+  if (!owner) return false;
+  return applyEventToMessage(owner, { type: "bounced", providerMessageId: owner.providerMessageId ?? "", permanent });
+}
+
+async function applyEventToMessage(owner: { id: string; companyId: string }, event: EmailEvent): Promise<boolean> {
   const db = tenantDb({ companyId: owner.companyId });
   const msg = await db.message.findUnique({ where: { id: owner.id }, select: { id: true, toAddress: true, leadId: true, status: true } });
   if (!msg) return false;

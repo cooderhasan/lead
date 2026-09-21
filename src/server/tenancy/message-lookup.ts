@@ -14,6 +14,22 @@ export async function findMessageOwner(providerMessageId: string) {
 }
 
 /**
+ * Geri dönen (bounce) e-postadaki kimliklerle giden iletiyi bulur: bizim ileti kimliğimiz
+ * (X-AISalesOS-Message-Id veya Message-ID'nin "@" öncesi) ya da sağlayıcı kimliği.
+ */
+export async function findOutboundByIds(ids: string[]) {
+  const clean = [...new Set(ids.map((r) => r.replace(/[<>]/g, "").trim()).filter(Boolean))];
+  if (!clean.length) return null;
+  return rawDb.message.findFirst({
+    where: {
+      direction: "OUTBOUND",
+      OR: [{ id: { in: clean.flatMap((r) => [r, r.split("@")[0]!]) } }, { providerMessageId: { in: [...clean, ...clean.map((r) => `<${r}>`)] } }],
+    },
+    select: { id: true, companyId: true, providerMessageId: true },
+  });
+}
+
+/**
  * Gelen yanıtın hangi şirkete ait olduğu: önce referanslardaki bizim / sağlayıcının mesaj kimliği,
  * olmazsa alıcı adresinin bir şirketin gönderici veya yanıt adresi olması. Yalnızca companyId döner.
  */

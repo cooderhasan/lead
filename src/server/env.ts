@@ -66,6 +66,13 @@ const schema = z.object({
   UNSUBSCRIBE_SECRET: optionalString,
   /** E-posta sağlayıcı webhook'ları için paylaşılan gizli anahtar (?token=…) */
   EMAIL_WEBHOOK_SECRET: optionalString,
+  /** Gelen yanıtlar: gönderici posta kutusu IMAP ile salt okunur okunur (boşsa kapalı) */
+  IMAP_HOST: optionalString,
+  IMAP_PORT: z.coerce.number().int().min(1).max(65535).default(993),
+  IMAP_SECURE: z.preprocess(emptyToUndefined, z.enum(["true", "false"]).default("true")).transform((v) => v === "true"),
+  IMAP_USER: optionalString,
+  IMAP_PASS: optionalString,
+  IMAP_MAILBOX: z.preprocess(emptyToUndefined, z.string().default("INBOX")),
 });
 
 export type Env = z.infer<typeof schema>;
