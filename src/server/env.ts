@@ -7,7 +7,14 @@ const optionalString = z.preprocess(emptyToUndefined, z.string().optional());
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   DATABASE_URL: z.string().min(1, "DATABASE_URL tanımlı değil"),
-  APP_URL: z.preprocess(emptyToUndefined, z.string().url().default("http://localhost:3000")),
+  // Coolify'ın yeni sürümleri SERVICE_FQDN_* değerini şemasız verir ("lead.ornek.com") → https:// eklenir
+  APP_URL: z.preprocess(
+    (v) => {
+      const s = emptyToUndefined(v);
+      return typeof s === "string" && !/^https?:\/\//i.test(s.trim()) ? `https://${s.trim()}` : s;
+    },
+    z.string().url().default("http://localhost:3000"),
+  ),
   /** false → /register kapalı (herkese açık demo sunucusunda AI kredisini korumak için) */
   ALLOW_SIGNUP: z.preprocess(emptyToUndefined, z.enum(["true", "false"]).default("true")).transform((v) => v === "true"),
   ENCRYPTION_KEY: optionalString,
