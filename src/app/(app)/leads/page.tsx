@@ -143,12 +143,13 @@ export default async function LeadsPage({
             <option value="45">45+</option>
           </Select>
           <button type="submit" className={buttonClass("secondary")}>Filtrele</button>
-          {canWrite && aiReady && unscored.length > 0 && (
-            <div className="ml-auto">
-              <ScoreLeadsButton leadIds={unscored} label={`Bu sayfadaki ${unscored.length} lead'i puanla (${unscored.length} kredi)`} />
-            </div>
-          )}
         </form>
+        {/* Filtre formunun DIŞINDA olmalı: iç içe <form> geçersizdir, tarayıcı butonu dış formu (filtre) gönderir */}
+        {canWrite && aiReady && unscored.length > 0 && (
+          <div className="flex justify-end border-b border-border px-5 py-3">
+            <ScoreLeadsButton leadIds={unscored} label={`Bu sayfadaki ${unscored.length} lead'i puanla (${unscored.length} kredi)`} />
+          </div>
+        )}
 
         {rows.length === 0 ? (
           <EmptyState
