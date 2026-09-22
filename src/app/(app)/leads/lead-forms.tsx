@@ -4,6 +4,8 @@ import {
   createLeadAction,
   findEmailsAction,
   importLeadsCsvAction,
+  quickDeleteLeadAction,
+  quickSetEmailAction,
   researchLeadAction,
   scoreLeadsAction,
   searchLeadsAction,
@@ -13,7 +15,8 @@ import { reviewComplianceAction } from "@/app/actions/email";
 import { addReplyAction } from "@/app/actions/conversations";
 import { ActionForm, FormMessage, SubmitButton } from "@/components/forms";
 import { Field, Input, Select, Textarea } from "@/components/ui";
-import { Search, Sparkles, Upload } from "lucide-react";
+import { Loader2, Plus, Search, Sparkles, Trash2, Upload } from "lucide-react";
+import { useFormStatus } from "react-dom";
 
 export function LeadSearchForm({ enabled, maxLimit }: { enabled: boolean; maxLimit: number }) {
   return (
@@ -235,6 +238,67 @@ export function ScoreLeadsButton({ leadIds, label }: { leadIds: string[]; label:
             {label}
           </SubmitButton>
           <FormMessage state={state} />
+        </>
+      )}
+    </ActionForm>
+  );
+}
+
+/** Listede satır içi "e-posta ekle": lead sayfasına girmeden kurumsal adres girilir */
+export function QuickEmailForm({ leadId }: { leadId: string }) {
+  return (
+    <ActionForm action={quickSetEmailAction} className="gap-1">
+      {(state) => (
+        <>
+          <input type="hidden" name="id" value={leadId} />
+          <div className="flex items-center gap-1.5">
+            <Input name="genericEmail" type="email" required placeholder="info@firma.com" aria-label="Kurumsal e-posta" className="h-8 min-w-0 flex-1 text-xs sm:w-52 sm:flex-none" />
+            <SubmitButton size="sm" variant="secondary" pendingText="…" className="h-8 px-2.5">
+              <Plus className="size-3.5" aria-hidden /> Ekle
+            </SubmitButton>
+          </div>
+          {state.error && <p className="text-xs text-danger">{state.error}</p>}
+          {state.ok && <p className="text-xs text-success">{state.message}</p>}
+        </>
+      )}
+    </ActionForm>
+  );
+}
+
+function DeleteIconButton() {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      title="Lead'i sil"
+      aria-label="Lead'i sil"
+      className="grid size-8 place-items-center rounded-lg text-text-3 transition-colors hover:bg-danger-soft hover:text-danger disabled:opacity-50"
+    >
+      {pending ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Trash2 className="size-4" aria-hidden />}
+    </button>
+  );
+}
+
+/** Listede satır içi silme (onay sorar; sayfa değişmez) */
+export function QuickDeleteButton({ leadId, name }: { leadId: string; name: string }) {
+  return (
+    <ActionForm action={quickDeleteLeadAction} className="gap-0">
+      {(state) => (
+        <>
+          <input type="hidden" name="id" value={leadId} />
+          <span
+            className="contents"
+            onClickCapture={(e) => {
+              if ((e.target as HTMLElement).closest("button") && !window.confirm(`"${name}" silinsin mi? Bu işlem geri alınamaz.`)) {
+                e.preventDefault();
+                e.stopPropagation();
+              }
+            }}
+          >
+            <DeleteIconButton />
+          </span>
+          {state.error && <p className="text-xs text-danger">{state.error}</p>}
         </>
       )}
     </ActionForm>

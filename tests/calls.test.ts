@@ -5,7 +5,7 @@ import { saveDiscoveredLeads, updateLeadContactInfo } from "@/server/services/le
 import { listCallQueue, logCall } from "@/server/services/calls";
 import { findLeadEmails, getLastEmailDiscovery, startEmailDiscovery } from "@/server/services/lead-intelligence";
 import { pickCompanyEmail } from "@/lib/lead-normalize";
-import { decodeCfEmail, extractPage } from "@/server/web/fetch-site";
+import { decodeCfEmail, extractPage, originCandidates } from "@/server/web/fetch-site";
 import type { TenantContext } from "@/server/tenancy/types";
 import { createTenant, resetDb, startSite } from "./helpers";
 
@@ -93,14 +93,40 @@ describe("kurumsal e-posta seçimi", () => {
     // Özet: .invalid siteye ulaşılamaz → "ulaşılamadı" sayılır; B şirketi A'nın aramasını görmez
     const last = await getLastEmailDiscovery(a);
     expect(last).toMatchObject({ status: "SUCCEEDED", total: 1, found: 0, notFound: 0, blocked: 0, failed: 1 });
-    expect(last!.items).toEqual([{ leadId: ok, name: "X", outcome: "failed", reason: expect.stringMatching(/Alan adı bulunamadı/) }]);
+    expect(last!.items).toMatchObject([{ leadId: ok, name: "X", outcome: "failed", reason: expect.stringMatching(/Alan adı bulunamadı/), currentEmail: null }]);
     expect(await getLastEmailDiscovery(b)).toBeNull();
     const viewer = await createTenant("V", "VIEWER");
     await expect(startEmailDiscovery(viewer, [ok!])).rejects.toThrow();
   });
 });
 
+describe("site adresi yedekleri ve sosyal medya", () => {
+  it("kayıtlı adres önce, sonra https (www'suz/www'li), en son http denenir", () => {
+    expect(originCandidates(new URL("http://www.trendmakine.com/")).map(String)).toEqual([
+      "http://www.trendmakine.com/",
+      "https://trendmakine.com/",
+      "https://www.trendmakine.com/",
+      "http://trendmakine.com/",
+    ]);
+    expect(originCandidates(new URL("http://127.0.0.1:8080/")).map(String)).toEqual(["http://127.0.0.1:8080/"]);
+  });
+
+  it("web sitesi olarak sosyal medya kayıtlıysa taranmaz, nedeni yazılır", async () => {
+    const a = await createTenant("A");
+    const [l] = await leads(a, [{ name: "Demir Kalıp", website: "https://www.instagram.com/demir_kalip" }]);
+    const res = await findLeadEmails(a.companyId, [l!]);
+    expect(res.items).toEqual([{ leadId: l, name: "Demir Kalıp", outcome: "notFound", reason: expect.stringMatching(/sosyal medya/) }]);
+  });
+});
+
 describe("iletişim bilgisi düzenleme", () => {
+  it("hızlı e-posta ekleme yalnızca e-postayı değiştirir (telefon / site korunur)", async () => {
+    const a = await createTenant("A");
+    const [l] = await leads(a, [{ name: "Trend", website: "trendmakine.com", phone: "0362 111 22 33" }]);
+    await updateLeadContactInfo(a, { id: l!, genericEmail: "trend@trendmakine.com" });
+    expect(await rawDb.lead.findUniqueOrThrow({ where: { id: l } })).toMatchObject({ genericEmail: "trend@trendmakine.com", normalizedPhone: "+903621112233", domain: "trendmakine.com" });
+  });
+
   it("kurumsal ve firma adlı adres kaydedilir; kişisel adres reddedilir; başka şirket / izleyici değiştiremez", async () => {
     const a = await createTenant("A");
     const b = await createTenant("B");

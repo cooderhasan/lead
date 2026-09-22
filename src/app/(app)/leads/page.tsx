@@ -14,7 +14,7 @@ import { Alert, Badge, Card, CardBody, CardHeader, EmptyState, Input, LinkButton
 import { cn } from "@/lib/cn";
 import { LEAD_STATUSES } from "@/lib/validation";
 import { scoreTone } from "@/lib/lead-scoring";
-import { CsvImportForm, FindEmailsButton, LeadSearchForm, ScoreLeadsButton } from "./lead-forms";
+import { CsvImportForm, FindEmailsButton, LeadSearchForm, QuickDeleteButton, QuickEmailForm, ScoreLeadsButton } from "./lead-forms";
 
 export const metadata: Metadata = { title: "Potansiyel müşteriler" };
 
@@ -158,7 +158,7 @@ export default async function LeadsPage({
                 steps={[[0, "Siteler sırayla taranıyor (firma başına birkaç saniye)…"]]}
               />
             ) : (
-              <EmailDiscoverySummary run={emailRun} />
+              <EmailDiscoverySummary run={emailRun} canWrite={canWrite} />
             )}
           </div>
         )}
@@ -188,6 +188,7 @@ export default async function LeadsPage({
                   <th className="hidden px-3 py-2.5 lg:table-cell">Sektör</th>
                   <th className="px-3 py-2.5">Durum</th>
                   <th className="hidden px-5 py-2.5 xl:table-cell">Kaynak</th>
+                  {canWrite && <th className="w-12 px-3 py-2.5"><span className="sr-only">İşlemler</span></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -215,6 +216,13 @@ export default async function LeadsPage({
                         ))}
                       </div>
                     </td>
+                    {canWrite && (
+                      <td className="px-3 py-3">
+                        <div className="opacity-60 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                          <QuickDeleteButton leadId={l.id} name={l.companyName} />
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -258,7 +266,7 @@ function ScorePill({ score }: { score: number }) {
   );
 }
 
-function EmailDiscoverySummary({ run }: { run: NonNullable<Awaited<ReturnType<typeof getLastEmailDiscovery>>> }) {
+function EmailDiscoverySummary({ run, canWrite }: { run: NonNullable<Awaited<ReturnType<typeof getLastEmailDiscovery>>>; canWrite: boolean }) {
   const when = run.finishedAt?.toLocaleString("tr-TR", { timeZone: "Europe/Istanbul", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
   if (run.status !== "SUCCEEDED") {
     return <Alert tone="danger">E-posta araması tamamlanamadı{run.error ? `: ${run.error}` : "."} Tekrar deneyebilirsiniz.</Alert>;
@@ -297,12 +305,20 @@ function EmailDiscoverySummary({ run }: { run: NonNullable<Awaited<ReturnType<ty
             {[...run.items]
               .sort((a, b) => OUTCOME_ORDER.indexOf(a.outcome) - OUTCOME_ORDER.indexOf(b.outcome))
               .map((it) => (
-                <li key={it.leadId} className="flex flex-col gap-1 px-3 py-2.5 sm:flex-row sm:items-center sm:gap-3">
-                  <span className="shrink-0 sm:w-40"><Badge tone={OUTCOME_META[it.outcome].tone}>{OUTCOME_META[it.outcome].label}</Badge></span>
-                  <Link href={`/leads/${it.leadId}`} className="min-w-0 truncate text-sm font-medium text-text hover:text-accent-text sm:w-72 sm:shrink-0">{it.name}</Link>
-                  <span className="min-w-0 flex-1 text-xs text-text-2">
-                    {it.outcome === "found" ? <span className="font-medium text-success">{it.email}</span> : it.reason}
-                  </span>
+                <li key={it.leadId} className="flex flex-col gap-2 px-3 py-2.5 lg:flex-row lg:items-center lg:gap-3">
+                  <span className="shrink-0 lg:w-36"><Badge tone={OUTCOME_META[it.outcome].tone}>{OUTCOME_META[it.outcome].label}</Badge></span>
+                  <div className="min-w-0 flex-1">
+                    <Link href={`/leads/${it.leadId}`} className="block truncate text-sm font-medium text-text hover:text-accent-text">{it.name}</Link>
+                    <p className="text-xs text-text-2">
+                      {it.currentEmail ? <span className="font-medium text-success">{it.currentEmail}</span> : it.reason}
+                    </p>
+                  </div>
+                  {canWrite && (
+                    <div className="flex shrink-0 items-start gap-1.5">
+                      {!it.currentEmail && <QuickEmailForm leadId={it.leadId} />}
+                      <QuickDeleteButton leadId={it.leadId} name={it.name} />
+                    </div>
+                  )}
                 </li>
               ))}
           </ul>

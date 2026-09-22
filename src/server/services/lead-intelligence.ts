@@ -628,6 +628,11 @@ export async function findLeadEmails(companyId: string, leadIds: string[], progr
     const lead = await db.lead.findUnique({ where: { id: leadId }, select: { id: true, companyName: true, website: true, genericEmail: true } });
     if (!lead?.website || lead.genericEmail) continue;
     const base = { leadId, name: lead.companyName };
+    if (SOCIAL_HOST.test(hostOf(lead.website))) {
+      items.push({ ...base, outcome: "notFound", reason: "Web sitesi yerine sosyal medya sayfası kayıtlı; sosyal medya taranmaz." });
+      await progress?.(Math.round(((i + 1) / leadIds.length) * 100));
+      continue;
+    }
     try {
       const crawl = await crawlSite(lead.website, { maxPages: 3, ensureContactPage: true, allowPrivateHosts: allowPrivateFetch() });
       const seen = [...new Set(crawl.pages.flatMap((p) => p.emails))];
@@ -650,6 +655,18 @@ export async function findLeadEmails(companyId: string, leadIds: string[], progr
   return { found: count("found"), notFound: count("notFound"), blocked: count("blocked"), failed: count("failed"), items };
 }
 
+/** Dizinlerde web sitesi yerine girilen sosyal medya / pazaryeri adresleri (taranmaz; kendi robots kuralları da yasaklar) */
+const SOCIAL_HOST = /(^|\.)(instagram\.com|facebook\.com|fb\.com|linkedin\.com|twitter\.com|x\.com|youtube\.com|tiktok\.com|wa\.me|whatsapp\.com|sahibinden\.com|trendyol\.com|hepsiburada\.com|n11\.com|google\.com|business\.site|linktr\.ee)$/i;
+
+/** extractDomain sosyal medyada bilerek null döner; burada ham host gerekir */
+function hostOf(website: string): string {
+  try {
+    return new URL(/^https?:\/\//i.test(website) ? website : `https://${website}`).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
 /** Sitede adres varsa neden seçilmediğini adresi yazmadan açıklar */
 function whyNoEmail(seen: string[], website: string, pages: number): string {
   if (seen.length === 0) return `Taranan ${pages} sayfada e-posta adresi yok (iletişim formu kullanıyor olabilir).`;
@@ -670,6 +687,13 @@ export async function getLastEmailDiscovery(ctx: TenantContext) {
   if (!job) return null;
   const total = ((job.payload as { leadIds?: string[] } | null)?.leadIds ?? []).length;
   const r = (job.result ?? {}) as { found?: number; notFound?: number; blocked?: number; failed?: number; items?: EmailDiscoveryItem[] };
+  // Sonuç listesi güncel kalsın: silinen lead'ler çıkar, sonradan elle eklenen adres gösterilir
+  const raw = r.items ?? [];
+  const current = raw.length
+    ? await tenantDb(ctx).lead.findMany({ where: { id: { in: raw.map((x) => x.leadId) } }, select: { id: true, genericEmail: true } })
+    : [];
+  const emailById = new Map(current.map((l) => [l.id, l.genericEmail]));
+  const items = raw.filter((x) => emailById.has(x.leadId)).map((x) => ({ ...x, currentEmail: emailById.get(x.leadId) ?? null }));
   return {
     id: job.id,
     status: job.status,
@@ -680,6 +704,6 @@ export async function getLastEmailDiscovery(ctx: TenantContext) {
     notFound: r.notFound ?? 0,
     blocked: r.blocked ?? 0,
     failed: r.failed ?? 0,
-    items: r.items ?? [],
+    items,
   };
 }

@@ -105,6 +105,30 @@ export async function updateLeadContactAction(_: ActionState, fd: FormData): Pro
   });
 }
 
+/** Listeden hızlı e-posta ekleme (lead sayfasına girmeden) */
+export async function quickSetEmailAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  return safeAction(async () => {
+    const ctx = await requireTenant();
+    const id = String(fd.get("id") ?? "");
+    const genericEmail = String(fd.get("genericEmail") ?? "").trim();
+    if (!genericEmail) throw new AppError("VALIDATION", "E-posta adresini yazın.", { genericEmail: "Gerekli" });
+    await updateLeadContactInfo(ctx, { id, genericEmail });
+    revalidatePath("/leads");
+    revalidatePath(`/leads/${id}`);
+    return { ok: true, message: "E-posta eklendi." };
+  });
+}
+
+/** Listeden hızlı silme (sayfa değişmez) */
+export async function quickDeleteLeadAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  return safeAction(async () => {
+    const ctx = await requireTenant();
+    await deleteLead(ctx, String(fd.get("id") ?? ""));
+    revalidatePath("/leads");
+    return { ok: true, message: "Lead silindi." };
+  });
+}
+
 export async function updateLeadStatusAction(fd: FormData) {
   const ctx = await requireTenant();
   const input = parseForm(leadStatusSchema, fd);

@@ -275,16 +275,16 @@ export interface CrawlResult {
   skipped: Array<{ url: string; reason: string }>;
 }
 
-/** https://firma.com → https://www.firma.com → http://firma.com (IP adreslerinde yalnızca kendisi) */
-function originCandidates(start: URL): URL[] {
-  const out = [start];
-  if (isIP(start.hostname)) return out;
+/**
+ * Kayıtlı adres önce; sonra https (www'suz / www'li), en son http. Dizinlerden gelen adresler çoğu zaman
+ * "http://www.…" olur ve https'e yönlenir; sertifika ise yalnızca diğer ada verilmiş olabilir. IP'de yalnızca kendisi.
+ */
+export function originCandidates(start: URL): URL[] {
+  if (isIP(start.hostname)) return [start];
   const path = `${start.pathname}${start.search}`;
-  if (start.protocol === "https:") {
-    if (!start.hostname.startsWith("www.")) out.push(new URL(`https://www.${start.hostname}${path}`));
-    out.push(new URL(`http://${start.hostname}${path}`));
-  }
-  return out;
+  const bare = start.hostname.replace(/^www\./, "");
+  const out = [start.toString(), ...["https:", "http:"].flatMap((proto) => [`${proto}//${bare}${path}`, `${proto}//www.${bare}${path}`])];
+  return [...new Set(out)].map((u) => new URL(u));
 }
 
 /** Ağ hatasını kullanıcıya anlaşılır Türkçe açıklamaya çevirir */
@@ -333,7 +333,12 @@ export async function crawlSite(input: string, opts: FetchOptions & { maxPages?:
     throw new FetchBlockedError("Sitenin robots.txt dosyası analize izin vermiyor.");
   }
 
-  const home = await safeFetch(start, opts);
+  let home = await safeFetch(start, opts);
+  // Dizindeki adres eski bir alt sayfa olabilir (/iletisim-1.html → 404) → ana sayfaya dönülür
+  if ((home.status >= 400 || !home.body) && start.pathname !== "/") {
+    const root = new URL("/", start);
+    if (isAllowedByRobots("/", disallowed)) home = await safeFetch(root, opts);
+  }
   if (home.status >= 400 || !home.body) {
     throw new Error(`Site açılamadı (HTTP ${home.status}).`);
   }

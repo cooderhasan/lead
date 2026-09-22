@@ -152,10 +152,12 @@ export async function updateLeadContactInfo(ctx: TenantContext, input: { id: str
     });
   }
 
-  await db.lead.update({
-    where: { id: lead.id },
-    data: { website: website ? (/^https?:\/\//i.test(website) ? website : `https://${website}`) : null, domain, phone, normalizedPhone, genericEmail: email },
-  });
+  // Yalnızca gönderilen alanlar değişir (hızlı "e-posta ekle" telefonu / siteyi silmesin)
+  const data: Prisma.LeadUpdateInput = {};
+  if (input.website !== undefined) Object.assign(data, { website: website ? (/^https?:\/\//i.test(website) ? website : `https://${website}`) : null, domain });
+  if (input.phone !== undefined) Object.assign(data, { phone, normalizedPhone });
+  if (input.genericEmail !== undefined) data.genericEmail = email;
+  await db.lead.update({ where: { id: lead.id }, data });
   await audit({ companyId: ctx.companyId, userId: ctx.userId, action: "lead.contact_updated", entityType: "Lead", entityId: lead.id, metadata: { website: Boolean(website), phone: Boolean(phone), email: Boolean(email) } });
 }
 
