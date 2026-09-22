@@ -5,6 +5,7 @@ import { tenantDb } from "@/server/tenancy/tenant-db";
 import { requireTenantPage, requireUserPage, listUserCompanies } from "@/server/tenancy/context";
 import { logoutAction, switchCompanyAction } from "@/app/actions/auth";
 import { AppShell } from "@/components/app-shell";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { formatNumber } from "@/lib/cn";
 
 const initials = (name: string) =>
@@ -55,6 +56,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </p>
       )}
       <div className="flex items-center gap-2">
+        <ThemeToggle className="hidden sm:flex" />
         {user.isPlatformAdmin && (
           <Link href="/admin" className="hidden items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium text-text-2 hover:bg-surface-2 sm:flex">
             <ShieldCheck className="size-4" aria-hidden /> Admin
@@ -83,6 +85,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <p className="truncate text-xs text-text-3">{user.email}</p>
         </div>
       </div>
+      <ThemeToggle className="mx-2.5 mt-3 w-fit sm:hidden" />
       <form action={logoutAction} className="mt-2">
         <button className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-text-2 hover:bg-surface-2 hover:text-text">
           <LogOut className="size-4" aria-hidden /> Çıkış yap

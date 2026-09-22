@@ -31,8 +31,10 @@
   color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
+/* Koyu tema: <html data-theme="dark"> — layout.tsx içindeki betik kullanıcı tercihine / sisteme göre ayarlar.
+   Yazdırma her zaman açık temadır. */
+@media screen {
+  :root[data-theme="dark"] {
     --bg: #0a0b0f;
     --surface: #12141a;
     --surface-2: #191c24;
