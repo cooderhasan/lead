@@ -375,10 +375,12 @@ function ListImportSummary({ run }: { run: NonNullable<Awaited<ReturnType<typeof
         Son liste: {run.created ?? 0} yeni firma eklendi{run.merged ? `, ${run.merged} mevcut kayıtla birleşti` : ""}.
       </p>
       <p className="mt-0.5 text-xs opacity-80">
+        {run.structured ? "Sayfanın veri tablosundan AI kullanılmadan okundu (ücretsiz) · " : ""}
         {run.extracted ?? 0} firma okundu
-        {run.dropped ? ` · ${run.dropped} tanesi kaynakta doğrulanamadığı için alınmadı` : ""}
-        {run.truncated ? " · liste uzundu, ilk kısmı işlendi (kalanı için sonraki sayfanın adresini girin)" : ""}
-        {added === 0 ? " · firma çıkmadığı için kredi iade edildi" : ""}
+        {run.dropped ? (run.structured ? ` · ${run.dropped} tekrar / adsız satır atlandı` : ` · ${run.dropped} tanesi kaynakta doğrulanamadığı için alınmadı`) : ""}
+        {run.filteredOut ? ` · ${run.filteredOut} firma filtreye uymadığı için alınmadı` : ""}
+        {run.truncated ? (run.structured ? " · tek seferde en fazla 1000 firma alınır" : " · liste uzundu, ilk kısmı işlendi (kalanı için sonraki sayfanın adresini girin)") : ""}
+        {added === 0 && !run.structured ? " · firma çıkmadığı için kredi iade edildi" : ""}
       </p>
     </Alert>
   );

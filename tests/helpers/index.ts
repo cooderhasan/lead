@@ -58,7 +58,7 @@ export async function startSite(pages: Record<string, string>): Promise<{ url: s
       res.end("not found");
       return;
     }
-    const type = req.url === "/robots.txt" ? "text/plain" : "text/html; charset=utf-8";
+    const type = req.url === "/robots.txt" ? "text/plain" : (req.url ?? "").split("?")[0]!.endsWith(".json") ? "application/json" : "text/html; charset=utf-8";
     res.writeHead(200, { "content-type": type });
     res.end(body);
   });

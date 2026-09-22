@@ -725,7 +725,7 @@ const LIST_MAX_CHUNKS = 2;
  * Liste sayfası adresi VEYA yapıştırılmış metinden firma içe aktarmayı başlatır.
  * AI yalnızca metni yapılandırır; her firma ve her bilgi kaynak metinde doğrulanır (uydurma kaydedilmez).
  */
-export async function startListImport(ctx: TenantContext, input: { url?: string | null; text?: string | null }) {
+export async function startListImport(ctx: TenantContext, input: { url?: string | null; text?: string | null; filter?: string | null }) {
   assertCan(ctx, "lead.write");
   if (!isAIConfigured()) throw new AppError("AI_UNAVAILABLE", "Listeden içe aktarma için AI gerekli (sunucuda AI yapılandırılmamış).");
   const url = input.url?.trim() || null;
@@ -749,7 +749,7 @@ export async function startListImport(ctx: TenantContext, input: { url?: string 
   try {
     jobId = await enqueue(
       "lead.list_import",
-      { url, text: text?.slice(0, LIST_CHUNK_CHARS * LIST_MAX_CHUNKS) ?? null, usageId },
+      { url, text: text?.slice(0, LIST_CHUNK_CHARS * LIST_MAX_CHUNKS) ?? null, usageId, filter: parseListFilter(input.filter) },
       { companyId: ctx.companyId, createdById: ctx.userId, maxAttempts: 2 },
     );
   } catch (err) {
@@ -821,13 +821,36 @@ export function verifyListCompanies(items: ListImportOutput["companies"], text: 
 }
 
 /** İş içinden çağrılır */
-export async function importFromList(companyId: string, payload: { url?: string | null; text?: string | null }, progress?: (pct: number) => Promise<void>) {
+export async function importFromList(
+  companyId: string,
+  payload: { url?: string | null; text?: string | null; filter?: string[] },
+  progress?: (pct: number) => Promise<void>,
+) {
+  const filter = payload.filter ?? [];
   let text = payload.text ?? "";
   let sourceUrl: string | null = null;
   if (payload.url) {
     const page = await fetchListPage(payload.url, { allowPrivateHosts: allowPrivateFetch() });
     text = page.text;
     sourceUrl = page.finalUrl;
+    // Yapılandırılmış veri (DataTables) varsa AI'sız, birebir eşleştirme — hızlı, ücretsiz, uydurma riski yok
+    const mapped = page.records ? mapStructuredRecords(page.records, sourceUrl) : null;
+    if (mapped && mapped.leads.length > 0) {
+      await progress?.(50);
+      const matching = applyListFilter(mapped.leads, filter);
+      const leads = matching.slice(0, STRUCTURED_MAX);
+      const saved = await saveDiscoveredLeads(companyId, leads, { provider: "directory" });
+      return {
+        sourceUrl,
+        structured: true,
+        truncated: matching.length > STRUCTURED_MAX,
+        extracted: page.records!.length,
+        dropped: mapped.dropped,
+        filteredOut: mapped.leads.length - matching.length,
+        created: saved.created,
+        merged: saved.merged,
+      };
+    }
   }
   if (text.replace(/\s+/g, "").length < 40) {
     throw new AppError("VALIDATION", "Sayfada okunabilir liste bulunamadı (içerik JavaScript ile yükleniyor olabilir). Listeyi kopyalayıp metin olarak yapıştırın.");
@@ -848,10 +871,14 @@ export async function importFromList(companyId: string, payload: { url?: string 
     await progress?.(20 + Math.round(((i + 1) / chunks.length) * 60));
   }
 
-  const { leads, dropped } = verifyListCompanies(extracted, text, sourceUrl);
+  const verified = verifyListCompanies(extracted, text, sourceUrl);
+  const { dropped } = verified;
+  const leads = applyListFilter(verified.leads, filter);
   const saved = leads.length ? await saveDiscoveredLeads(companyId, leads, { provider: "directory" }) : { created: 0, merged: 0 };
   return {
     sourceUrl,
+    structured: false,
+    filteredOut: verified.leads.length - leads.length,
     truncated: text.length > LIST_CHUNK_CHARS * LIST_MAX_CHUNKS,
     extracted: extracted.length,
     dropped,
@@ -869,6 +896,86 @@ export async function getLastListImport(ctx: TenantContext) {
   });
   if (!job) return null;
   const p = job.payload as { url?: string | null };
-  const r = (job.result ?? {}) as { extracted?: number; dropped?: number; created?: number; merged?: number; truncated?: boolean };
+  const r = (job.result ?? {}) as { extracted?: number; dropped?: number; created?: number; merged?: number; truncated?: boolean; structured?: boolean; filteredOut?: number };
   return { id: job.id, status: job.status, error: job.error, finishedAt: job.finishedAt, url: p.url ?? null, ...r };
+}
+
+/** "otomotiv, makina; pres" → ["otomotiv","makina","pres"] (en fazla 10) */
+export function parseListFilter(input: string | null | undefined): string[] {
+  return (input ?? "")
+    .split(/[,;\n]+/)
+    .map((w) => w.trim())
+    .filter((w) => w.length >= 2)
+    .slice(0, 10);
+}
+
+/** Filtre verildiyse yalnızca sektöründe veya adında kelimelerden biri geçen firmalar (Türkçe harf farkı gözetilmez) */
+export function applyListFilter(leads: RawLead[], filter: string[]): RawLead[] {
+  if (!filter.length) return leads;
+  const words = filter.map(normalizeForMatch).filter(Boolean);
+  return leads.filter((l) => {
+    const hay = normalizeForMatch(`${l.category ?? ""} ${l.companyName}`);
+    return words.some((w) => hay.includes(w));
+  });
+}
+
+/** Yapılandırılmış listede tek seferde en fazla içe aktarılan firma */
+const STRUCTURED_MAX = 1000;
+
+const FIELD_KEYS: Record<"name" | "phone" | "email" | "website" | "sector" | "address" | "city" | "district", RegExp> = {
+  name: /^(company_?name|single_?company_?name|firma_?(adi|unvani?|ismi)?|unvan|ticari_?unvan|company|name|title|firma)$/i,
+  phone: /^(phone(_?no|_?number)?|tel(efon)?(_?no)?|gsm)$/i,
+  email: /^(e?_?mail|e_?posta|eposta)$/i,
+  website: /^(web_?site|website|web|url|site|internet_?adresi)$/i,
+  sector: /^(sector(_?name)?|sektor(_?adi)?|faaliyet(_?alani)?|category|kategori)$/i,
+  address: /^(address|adres|parcel_?address|acik_?adres)$/i,
+  city: /^(city|il|sehir)$/i,
+  district: /^(district|ilce|region|bolge)$/i,
+};
+
+const stripTags = (v: unknown): string | null => {
+  if (v === null || v === undefined) return null;
+  const s = String(v).replace(/<[^>]*>/g, " ").replace(/&amp;/g, "&").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+  return s && s !== "-" && s.toLowerCase() !== "null" ? s : null;
+};
+
+/**
+ * Yapılandırılmış liste satırlarını (DataTables JSON) AI olmadan lead'e çevirir. Saf fonksiyon.
+ * Alan adları tanınmazsa null döner (AI ile metinden çıkarmaya düşülür). Değerler kaynaktan birebir alınır.
+ */
+export function mapStructuredRecords(records: Array<Record<string, unknown>>, sourceUrl: string | null) {
+  const keys = Object.keys(records[0] ?? {});
+  const pick = (field: keyof typeof FIELD_KEYS) => keys.find((k) => FIELD_KEYS[field].test(k.replace(/[\s-]/g, "_")));
+  const k = { name: pick("name"), phone: pick("phone"), email: pick("email"), website: pick("website"), sector: pick("sector"), address: pick("address"), city: pick("city"), district: pick("district") };
+  if (!k.name) return null;
+
+  const seen = new Set<string>();
+  const leads: RawLead[] = [];
+  let dropped = 0;
+  for (const r of records) {
+    const name = stripTags(r[k.name]);
+    const key = name ? normalizeForMatch(name) : "";
+    if (!name || key.length < 2 || seen.has(key)) {
+      dropped++;
+      continue;
+    }
+    seen.add(key);
+    const website = k.website ? extractDomain(stripTags(r[k.website]) ?? "") : null;
+    const email = k.email ? normalizeEmail(stripTags(r[k.email])) : null;
+    const phone = k.phone ? stripTags(r[k.phone]) : null;
+    leads.push({
+      companyName: name.slice(0, 300),
+      website: website ?? undefined,
+      phone: phone && normalizePhone(phone) ? phone : undefined,
+      // Kişisel adres (ahmet@…) firma genel e-postası olarak alınmaz
+      genericEmail: email && isCompanyEmail(email, website) ? email : undefined,
+      address: (k.address && stripTags(r[k.address])?.slice(0, 500)) || undefined,
+      city: (k.city && stripTags(r[k.city])?.slice(0, 80)) || undefined,
+      district: (k.district && stripTags(r[k.district])?.slice(0, 120)) || undefined,
+      category: (k.sector && stripTags(r[k.sector])?.slice(0, 200)) || undefined,
+      sourceType: "DIRECTORY",
+      sourceUrl: sourceUrl ?? undefined,
+    });
+  }
+  return { leads, dropped };
 }

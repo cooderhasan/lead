@@ -76,6 +76,13 @@ export function ListImportForm({ enabled }: { enabled: boolean }) {
           >
             <Input id="list-url" name="url" type="url" inputMode="url" placeholder="https://www.osb.org.tr/firmalar" disabled={!enabled} />
           </Field>
+          <Field
+            label="Sektör / anahtar kelime filtresi (isteğe bağlı)"
+            htmlFor="list-filter"
+            hint="Virgülle ayırın. Yalnızca sektöründe veya adında bu kelimelerden biri geçen firmalar alınır. Boş bırakılırsa tümü."
+          >
+            <Input id="list-filter" name="filter" placeholder="ör. otomotiv, makina, pres, döküm" maxLength={300} disabled={!enabled} />
+          </Field>
           <details>
             <summary className="cursor-pointer text-xs font-medium text-accent-text">Sayfa açılmıyorsa veya liste PDF&apos;teyse: metni yapıştır</summary>
             <Textarea name="text" rows={5} maxLength={50_000} className="mt-2 text-xs" placeholder="Listeyi kopyalayıp buraya yapıştırın (adres alanını boş bırakın)" disabled={!enabled} />

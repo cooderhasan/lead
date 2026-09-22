@@ -47,7 +47,8 @@ export async function importListAction(_: ActionState, fd: FormData): Promise<Ac
     const ctx = await requireTenant();
     const url = String(fd.get("url") ?? "").trim();
     const text = String(fd.get("text") ?? "").trim();
-    await startListImport(ctx, { url: url || null, text: text || null });
+    const filter = String(fd.get("filter") ?? "").trim();
+    await startListImport(ctx, { url: url || null, text: text || null, filter: filter || null });
     revalidatePath("/leads");
     return { ok: true, message: "Liste işleniyor; ilerleme bu kartta görünecek." };
   });

@@ -17,14 +17,16 @@ export const listImportJob: JobHandler<"lead.list_import"> = async (payload, h) 
     if (!isAppError(err) && payload.url) throw new PermanentJobError((err as Error).message);
     throw err;
   }
-  // Hiç firma çıkmadıysa kredi iade edilir (kullanıcı değer almadı)
-  if (res.created + res.merged === 0 && payload.usageId) await refundCredits(payload.usageId, "lead.list_import.empty");
+  // Hiç firma çıkmadıysa (kullanıcı değer almadı) veya AI hiç kullanılmadıysa (yapılandırılmış veri) kredi iade edilir
+  if ((res.created + res.merged === 0 || res.structured) && payload.usageId) {
+    await refundCredits(payload.usageId, res.structured ? "lead.list_import.structured" : "lead.list_import.empty");
+  }
   await audit({
     companyId: h.companyId,
     userId: h.createdById,
     actorType: "AI",
     action: "lead.list_import.completed",
-    metadata: { extracted: res.extracted, dropped: res.dropped, created: res.created, merged: res.merged },
+    metadata: { extracted: res.extracted, dropped: res.dropped, created: res.created, merged: res.merged, structured: res.structured },
   });
   return res;
 };

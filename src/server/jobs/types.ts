@@ -21,7 +21,7 @@ export interface JobPayloads {
   /** Web sitesinden kurumsal e-posta bulma (AI'sız, kredi düşmez) */
   "lead.find_email": { leadIds: string[] };
   /** Liste sayfası / yapıştırılmış metinden firma çıkarma (AI + kaynak metinde doğrulama) */
-  "lead.list_import": { url: string | null; text: string | null; usageId?: string };
+  "lead.list_import": { url: string | null; text: string | null; usageId?: string; filter?: string[] };
   /** Kampanya stratejisi (AI) — sonuç PENDING, insan onayı bekler */
   "campaign.strategy": { campaignId: string; usageId?: string };
   /** Kampanya ilk temas mesajları (AI) — her mesaj PENDING_APPROVAL */

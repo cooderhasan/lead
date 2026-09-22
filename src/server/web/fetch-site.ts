@@ -12,6 +12,8 @@ export interface FetchOptions {
   /** Yalnızca testler için: yerel test sunucusuna izin verir. */
   allowPrivateHosts?: boolean;
   timeoutMs?: number;
+  /** JSON yanıt beklenen istekler (ör. DataTables veri kaynağı) */
+  json?: boolean;
 }
 
 export interface PageContent {
@@ -90,7 +92,9 @@ export async function safeFetch(
       const res = await undiciFetch(url, {
         dispatcher: agent,
         redirect: "manual",
-        headers: { "user-agent": USER_AGENT, accept: "text/html,application/xhtml+xml,text/plain;q=0.8" },
+        headers: opts.json
+          ? { "user-agent": USER_AGENT, accept: "application/json", "x-requested-with": "XMLHttpRequest" }
+          : { "user-agent": USER_AGENT, accept: "text/html,application/xhtml+xml,text/plain;q=0.8" },
         signal: AbortSignal.timeout(opts.timeoutMs ?? 12_000),
       });
       if (res.status >= 300 && res.status < 400) {
@@ -101,7 +105,8 @@ export async function safeFetch(
         continue;
       }
       const contentType = res.headers.get("content-type") ?? "";
-      const body = res.ok && /text\/(html|plain)|xhtml/i.test(contentType) ? await readLimited(res) : "";
+      const readable = opts.json ? /json/i : /text\/(html|plain)|xhtml/i;
+      const body = res.ok && readable.test(contentType) ? await readLimited(res) : "";
       if (!body) await res.body?.cancel().catch(() => undefined);
       return { finalUrl: url, status: res.status, contentType, body };
     }
@@ -379,7 +384,7 @@ const MAX_LIST_TEXT = 60_000;
  * Tek bir liste sayfasını okur ve satır yapısını koruyan düz metne çevirir (tablo satırı → "a | b | c").
  * robots.txt'ye uyar. Sayfadaki web sitesi / e-posta bağlantıları metnin sonuna eklenir (AI eşleştirebilsin).
  */
-export async function fetchListPage(input: string, opts: FetchOptions = {}): Promise<{ finalUrl: string; text: string }> {
+export async function fetchListPage(input: string, opts: FetchOptions = {}): Promise<{ finalUrl: string; text: string; records: Array<Record<string, unknown>> | null }> {
   let start = normalizeUrl(input);
   let disallowed: RobotsRule[] = [];
   let reachable = false;
@@ -402,7 +407,50 @@ export async function fetchListPage(input: string, opts: FetchOptions = {}): Pro
   }
   const page = await safeFetch(start, { ...opts, timeoutMs: 20_000 });
   if (page.status >= 400 || !page.body) throw new Error(`Sayfa açılamadı (HTTP ${page.status}).`);
-  return { finalUrl: page.finalUrl.toString(), text: htmlToListText(page.body, page.finalUrl) };
+
+  // Tablo satırları sonradan JavaScript ile (DataTables) yükleniyorsa veriyi kaynağından al:
+  // yalnızca aynı site, robots.txt izin veriyorsa, tek istek.
+  let records: Array<Record<string, unknown>> | null = null;
+  const source = findDataTableSource(page.body, page.finalUrl);
+  if (source && isAllowedByRobots(source.pathname + source.search, disallowed)) {
+    try {
+      const res = await safeFetch(source, { ...opts, json: true, timeoutMs: 30_000 });
+      if (res.status < 400 && res.body) records = parseDataTableJson(res.body);
+    } catch {
+      /* veri kaynağı okunamadı → sayfa metniyle devam */
+    }
+  }
+  return { finalUrl: page.finalUrl.toString(), text: htmlToListText(page.body, page.finalUrl), records };
+}
+
+/** Sayfadaki DataTables "ajax" veri kaynağı (aynı site ise). Saf fonksiyon. */
+export function findDataTableSource(html: string, pageUrl: URL): URL | null {
+  const m =
+    html.match(/\bajax\s*:\s*['"]([^'"]+)['"]/) ??
+    html.match(/\bajax\s*:\s*\{[^}]*?\burl\s*:\s*['"]([^'"]+)['"]/) ??
+    html.match(/\bsAjaxSource['"]?\s*:\s*['"]([^'"]+)['"]/);
+  if (!m?.[1]) return null;
+  try {
+    const u = new URL(m[1], pageUrl);
+    return registrableHost(u.hostname) === registrableHost(pageUrl.hostname) && /^https?:$/.test(u.protocol) ? u : null;
+  } catch {
+    return null;
+  }
+}
+
+/** DataTables yanıtı: {data:[…]} / {aaData:[…]} / […] → nesne satırları */
+export function parseDataTableJson(body: string): Array<Record<string, unknown>> | null {
+  let json: unknown;
+  try {
+    json = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  const o = json as { data?: unknown; aaData?: unknown };
+  const rows = Array.isArray(json) ? json : Array.isArray(o?.data) ? o.data : Array.isArray(o?.aaData) ? o.aaData : null;
+  if (!rows) return null;
+  const objects = rows.filter((r): r is Record<string, unknown> => Boolean(r) && typeof r === "object" && !Array.isArray(r));
+  return objects.length ? objects.slice(0, 5000) : null;
 }
 
 /** HTML → satır korumalı metin. Saf fonksiyon (testlerde doğrudan kullanılır). */

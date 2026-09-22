@@ -5,8 +5,8 @@ import { __setLeadSourceProviderForTests } from "@/server/providers/lead-source"
 import { ApifyWebSearchProvider, companyNameFromTitle } from "@/server/providers/lead-source/apify-web";
 import type { LeadSearchQuery, LeadSourceProvider, RawLead } from "@/server/providers/lead-source/types";
 import { drainInlineJobs } from "@/server/jobs/queue";
-import { getLastListImport, startLeadSearch, startListImport, verifyListCompanies } from "@/server/services/lead-intelligence";
-import { htmlToListText } from "@/server/web/fetch-site";
+import { applyListFilter, getLastListImport, mapStructuredRecords, parseListFilter, startLeadSearch, startListImport, verifyListCompanies } from "@/server/services/lead-intelligence";
+import { findDataTableSource, htmlToListText, parseDataTableJson } from "@/server/web/fetch-site";
 import { MockAIProvider, createTenant, resetDb, startSite } from "./helpers";
 
 beforeEach(resetDb);
@@ -178,5 +178,71 @@ describe("liste sayfasından içe aktarma", () => {
     }
     const viewer = await createTenant("V", "VIEWER");
     await expect(startListImport(viewer, { text: "x".repeat(100) })).rejects.toThrow();
+  });
+});
+
+// ── Yapılandırılmış liste (DataTables) ─────────────────────────────────
+
+const DT_PAGE = `<html><body><h1>Firma Listesi</h1><table id="t"><thead><tr><th>Firma</th><th>Sektör</th></tr></thead></table>
+<script>$("#t").DataTable({ processing: true, ajax: "/data.json", columns: [{ data: "company_name" }] });</script></body></html>`;
+const DT_JSON = JSON.stringify({
+  draw: 0,
+  data: [
+    { company_name: "Acv Süspansiyon Sistemleri A.Ş.", sector_name: "Otomotiv Yedek Parça", phone_no: "3323101030", mail: null, website: "acvsuspension.com", parcel_address: "No: 9" },
+    { company_name: "Acv Süspansiyon Sistemleri A.Ş.", sector_name: "Otomotiv Yedek Parça", phone_no: null, mail: null, website: null, parcel_address: "No: 10" },
+    { company_name: "Mavi Gıda Ltd.", sector_name: "Gıda", phone_no: null, mail: "ahmet@mavigida.com", website: "mavigida.com", parcel_address: "-" },
+    { company_name: "Yıldız Makina", sector_name: "<b>Makina</b>", phone_no: "0332 111 22 33", mail: "info@yildizmakina.com", website: "https://yildizmakina.com", parcel_address: null },
+    { company_name: "", sector_name: "Boş", phone_no: null, mail: null, website: null, parcel_address: null },
+  ],
+});
+
+describe("yapılandırılmış liste (DataTables)", () => {
+  it("sayfadaki veri kaynağını bulur (yalnızca aynı site) ve JSON satırlarını okur", () => {
+    const page = new URL("https://www.kos.org.tr/list");
+    expect(findDataTableSource(`ajax: "https://www.kos.org.tr/list"`, page)?.toString()).toBe("https://www.kos.org.tr/list");
+    expect(findDataTableSource(`ajax: { url: "/api/firms", type: "GET" }`, page)?.toString()).toBe("https://www.kos.org.tr/api/firms");
+    expect(findDataTableSource(`ajax: "https://baska-site.com/veri"`, page)).toBeNull();
+    expect(findDataTableSource("<p>tablo yok</p>", page)).toBeNull();
+    expect(parseDataTableJson(DT_JSON)).toHaveLength(5);
+    expect(parseDataTableJson(JSON.stringify({ aaData: [{ a: 1 }] }))).toEqual([{ a: 1 }]);
+    expect(parseDataTableJson("<html>")).toBeNull();
+  });
+
+  it("alanları AI olmadan eşler; tekrar ve adsız satır atlanır; kişisel e-posta alınmaz; HTML temizlenir", () => {
+    const res = mapStructuredRecords(parseDataTableJson(DT_JSON)!, "https://www.kos.org.tr/list")!;
+    expect(res.dropped).toBe(2);
+    expect(res.leads.map((l) => l.companyName)).toEqual(["Acv Süspansiyon Sistemleri A.Ş.", "Mavi Gıda Ltd.", "Yıldız Makina"]);
+    expect(res.leads[0]).toMatchObject({ website: "acvsuspension.com", phone: "3323101030", category: "Otomotiv Yedek Parça", address: "No: 9", sourceType: "DIRECTORY" });
+    expect(res.leads[1]).toMatchObject({ genericEmail: undefined, address: undefined });
+    expect(res.leads[2]).toMatchObject({ genericEmail: "info@yildizmakina.com", website: "yildizmakina.com", category: "Makina" });
+    expect(mapStructuredRecords([{ foo: "x", bar: "y" }], null)).toBeNull();
+  });
+
+  it("anahtar kelime filtresi sektörde veya adda arar (Türkçe harf farkı gözetmez)", () => {
+    const { leads } = mapStructuredRecords(parseDataTableJson(DT_JSON)!, null)!;
+    expect(parseListFilter("otomotiv, MAKİNA;  x ")).toEqual(["otomotiv", "MAKİNA"]);
+    expect(applyListFilter(leads, parseListFilter("otomotiv, makina")).map((l) => l.companyName)).toEqual(["Acv Süspansiyon Sistemleri A.Ş.", "Yıldız Makina"]);
+    expect(applyListFilter(leads, [])).toHaveLength(3);
+  });
+
+  it("uçtan uca: veri kaynağından AI kullanılmadan içe aktarılır, filtre uygulanır, kredi iade edilir", async () => {
+    const a = await createTenant("A");
+    const site = await startSite({ "/robots.txt": "User-agent: *\nAllow: /", "/list": DT_PAGE, "/data.json": DT_JSON });
+    try {
+      const ai = new MockAIProvider(() => JSON.stringify({ companies: [] }));
+      __setAIProviderForTests(ai);
+      const before = await balance(a.companyId);
+      await startListImport(a, { url: `${site.url}/list`, filter: "otomotiv, makina" });
+      await drainInlineJobs();
+      expect(await getLastListImport(a)).toMatchObject({ status: "SUCCEEDED", structured: true, extracted: 5, dropped: 2, filteredOut: 1, created: 2 });
+      expect(ai.calls).toHaveLength(0);
+      expect(await balance(a.companyId)).toBe(before);
+      expect((await rawDb.lead.findMany({ where: { companyId: a.companyId }, orderBy: { companyName: "asc" } })).map((l) => l.companyName)).toEqual([
+        "Acv Süspansiyon Sistemleri A.Ş.",
+        "Yıldız Makina",
+      ]);
+    } finally {
+      site.server.close();
+    }
   });
 });
