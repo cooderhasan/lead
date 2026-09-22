@@ -5,7 +5,7 @@ import { saveDiscoveredLeads, updateLeadContactInfo } from "@/server/services/le
 import { listCallQueue, logCall } from "@/server/services/calls";
 import { findLeadEmails, getLastEmailDiscovery, startEmailDiscovery } from "@/server/services/lead-intelligence";
 import { pickCompanyEmail } from "@/lib/lead-normalize";
-import { decodeCfEmail, extractPage, originCandidates } from "@/server/web/fetch-site";
+import { crawlSite, decodeCfEmail, extractPage, originCandidates } from "@/server/web/fetch-site";
 import type { TenantContext } from "@/server/tenancy/types";
 import { createTenant, resetDb, startSite } from "./helpers";
 
@@ -97,6 +97,26 @@ describe("kurumsal e-posta seçimi", () => {
     expect(await getLastEmailDiscovery(b)).toBeNull();
     const viewer = await createTenant("V", "VIEWER");
     await expect(startEmailDiscovery(viewer, [ok!])).rejects.toThrow();
+  });
+});
+
+describe("site tarama sırası", () => {
+  it("ürünler sayfasının alt sayfaları (anahtar kelimesiz de olsa) genel sayfalardan önce taranır", async () => {
+    const site = await startSite({
+      "/": `<a href="/urunler.html">Ürünler</a><a href="/blog.html">Blog</a><a href="/haberler.html">Haberler</a>`,
+      "/urunler.html": `<a href="/dm.html"><img src="dm.png"></a><a href="/oto.html"><img src="oto.png"></a><a href="/iletisim.html">İletişim</a>`,
+      "/dm.html": "<p>Raylı sistemler için yolcu kapıları üretiyoruz.</p>",
+      "/oto.html": "<p>Otobüs acil çıkış kapı kilitleri.</p>",
+      "/iletisim.html": "<p>info@firma.com</p>",
+      "/blog.html": "<p>blog</p>",
+      "/haberler.html": "<p>haber</p>",
+    });
+    try {
+      const c = await crawlSite(site.url, { maxPages: 5, ensureContactPage: true, allowPrivateHosts: true });
+      expect(c.pages.map((p) => new URL(p.url).pathname)).toEqual(["/", "/urunler.html", "/iletisim.html", "/dm.html", "/oto.html"]);
+    } finally {
+      site.server.close();
+    }
   });
 });
 

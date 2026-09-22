@@ -314,7 +314,7 @@ export async function researchLead(companyId: string, leadId: string, progress?:
 
   let crawl;
   try {
-    crawl = await crawlSite(lead.website, { maxPages: 4, ensureContactPage: true, allowPrivateHosts: allowPrivateFetch() });
+    crawl = await crawlSite(lead.website, { maxPages: 7, ensureContactPage: true, allowPrivateHosts: allowPrivateFetch() });
   } catch (err) {
     if (err instanceof FetchBlockedError) throw new AppError("EXTERNAL_FETCH", err.message);
     throw new AppError("EXTERNAL_FETCH", `Lead sitesine ulaşılamadı: ${(err as Error).message}`);

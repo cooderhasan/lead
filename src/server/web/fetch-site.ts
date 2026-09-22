@@ -256,6 +256,24 @@ const PRIORITY_KEYWORDS = [
   "iletisim", "iletişim", "contact", "referans", "reference",
 ];
 
+const NON_PAGE_EXT = /\.(pdf|jpe?g|png|gif|webp|svg|zip|rar|docx?|xlsx?|mp4|mp3|css|js|xml)$/i;
+const PRODUCT_PATH = /urun|ürün|product|prodcts|hizmet|service|sektor|sektör|uygulama|application|faaliyet/i;
+
+/** Sayfa anahtarı: aynı sayfanın farklı yazımları (sondaki /, #) bir kez taranır */
+function pageKey(u: URL): string {
+  return `${u.hostname.replace(/^www\./, "")}${u.pathname.replace(/\/$/, "")}${u.search}`.toLowerCase();
+}
+
+/** Anahtar kelime puanı − derinlik cezası (anahtar kelimesiz sayfalar negatif ama sıradan çıkmaz) */
+function linkScore(u: URL): number {
+  const path = decodeURIComponent(u.pathname.toLowerCase());
+  let s = 0;
+  PRIORITY_KEYWORDS.forEach((k, i) => {
+    if (path.includes(k)) s += 100 - i;
+  });
+  return s - path.split("/").length * 2;
+}
+
 export function rankLinks(links: string[], home: URL): string[] {
   const skip = /\.(pdf|jpe?g|png|gif|webp|svg|zip|rar|docx?|xlsx?|mp4)$/i;
   const score = (u: string) => {
@@ -350,14 +368,30 @@ export async function crawlSite(input: string, opts: FetchOptions & { maxPages?:
   const homePage = extractPage(home.body, home.finalUrl);
   const pages: PageContent[] = [homePage];
 
-  let ranked = rankLinks(homePage.links, home.finalUrl);
-  if (opts.ensureContactPage) {
-    // İletişim sayfası e-posta / telefon için en değerli sayfadır → sayfa sınırına takılmasın
-    const contact = ranked.find((l) => CONTACT_PATH.test(decodeURIComponent(new URL(l).pathname)));
-    if (contact) ranked = [contact, ...ranked.filter((l) => l !== contact)];
-  }
-  for (const link of ranked) {
-    if (pages.length >= maxPages) break;
+  // Sıra: iletişim (istenirse) → anahtar kelimeli sayfalar → ürün / hizmet sayfalarının alt sayfaları → diğer iç sayfalar.
+  // Küçük sitelerde sektör / ürün sayfaları çoğu zaman "dm.html", "oto.html" gibi adlarla ürünler sayfasının altındadır.
+  const seen = new Set<string>([pageKey(home.finalUrl)]);
+  const queue: Array<{ url: string; score: number }> = [];
+  const addLinks = (links: string[], base: number) => {
+    for (const link of links) {
+      let u: URL;
+      try {
+        u = new URL(link);
+      } catch {
+        continue;
+      }
+      const key = pageKey(u);
+      if (seen.has(key) || NON_PAGE_EXT.test(u.pathname) || /\/index\.(html?|php|aspx?)$/i.test(u.pathname) || u.pathname.includes(":")) continue;
+      seen.add(key);
+      const contactBoost = opts.ensureContactPage && CONTACT_PATH.test(decodeURIComponent(u.pathname)) ? 1000 : 0;
+      queue.push({ url: link, score: base + linkScore(u) + contactBoost });
+    }
+  };
+  addLinks(homePage.links, 0);
+
+  while (pages.length < maxPages && queue.length) {
+    queue.sort((a, b) => b.score - a.score);
+    const { url: link } = queue.shift()!;
     const u = new URL(link);
     if (!isAllowedByRobots(u.pathname + u.search, disallowed)) {
       skipped.push({ url: link, reason: "robots.txt" });
@@ -366,8 +400,13 @@ export async function crawlSite(input: string, opts: FetchOptions & { maxPages?:
     try {
       await new Promise((r) => setTimeout(r, 300));
       const res = await safeFetch(u, opts);
-      if (res.status < 400 && res.body) pages.push(extractPage(res.body, res.finalUrl));
-      else skipped.push({ url: link, reason: `HTTP ${res.status}` });
+      if (res.status < 400 && res.body) {
+        const page = extractPage(res.body, res.finalUrl);
+        pages.push(page);
+        // Ürün / hizmet / sektör sayfasının alt sayfaları, genel sayfalardan önce gelir
+        if (PRODUCT_PATH.test(decodeURIComponent(u.pathname))) addLinks(page.links, 60);
+        else addLinks(page.links, -50);
+      } else skipped.push({ url: link, reason: `HTTP ${res.status}` });
     } catch (err) {
       skipped.push({ url: link, reason: (err as Error).message.slice(0, 120) });
     }
