@@ -62,7 +62,40 @@ export function normalizePhone(input: string | null | undefined, defaultCountry:
 const GENERIC_MAILBOXES = new Set([
   "info", "bilgi", "iletisim", "contact", "sales", "satis", "destek", "support", "musteri",
   "hello", "merhaba", "office", "ofis", "admin", "mail", "kurumsal", "ik", "hr", "muhasebe", "export", "ihracat",
+  "satinalma", "purchasing", "siparis", "order", "orders", "teklif", "genel", "pazarlama", "marketing", "info1", "infotr",
 ]);
+
+/** Satış teması için tercih sırası (satın alma en iyisi); İK / muhasebe kutuları hiç seçilmez. */
+const EMAIL_PREFERENCE = ["satinalma", "purchasing", "info", "bilgi", "iletisim", "contact", "satis", "sales", "siparis", "teklif", "genel", "kurumsal", "ihracat", "export", "office", "ofis"];
+const NEVER_PICK = new Set(["ik", "hr", "muhasebe", "admin", "destek", "support"]);
+const FREE_MAIL = /^(gmail|googlemail|hotmail|outlook|live|yahoo|yandex|icloud|mail)\.(com|com\.tr|net)$/;
+
+/**
+ * Web sitesinde BULUNAN adresler arasından firmanın kurumsal genel e-postasını seçer (AI'sız, uydurma yok).
+ * Kabul: kişisel olmayan kutu (info@, satinalma@…) ve sitenin kendi alan adı. Alan adı farklıysa
+ * (ör. web ajansının adresi) seçilmez; yalnızca ücretsiz posta servisinde firma adını taşıyan adres (firmaadi@gmail.com) kabul edilir.
+ */
+export function pickCompanyEmail(emails: string[], website: string | null | undefined): string | null {
+  const site = extractDomain(website ?? "");
+  const siteToken = site?.split(".")[0]?.replace(/-/g, "") ?? "";
+  const candidates: Array<{ email: string; rank: number }> = [];
+  for (const raw of emails) {
+    const email = normalizeEmail(raw);
+    if (!email || /no-?reply|mailer-daemon|postmaster|example\.|sentry|wixpress/.test(email)) continue;
+    const [local = "", domain = ""] = email.split("@");
+    const key = local.replace(/[._-]/g, "");
+    const sameDomain = Boolean(site && (domain === site || domain.endsWith(`.${site}`) || site.endsWith(`.${domain}`)));
+    if (sameDomain) {
+      if (!isGenericEmail(email) || NEVER_PICK.has(key)) continue;
+      const i = EMAIL_PREFERENCE.indexOf(key);
+      candidates.push({ email, rank: i === -1 ? EMAIL_PREFERENCE.length : i });
+    } else if (FREE_MAIL.test(domain) && siteToken.length >= 4 && key.includes(siteToken)) {
+      candidates.push({ email, rank: EMAIL_PREFERENCE.length + 1 });
+    }
+  }
+  candidates.sort((a, b) => a.rank - b.rank);
+  return candidates[0]?.email ?? null;
+}
 
 /** Kurumsal genel kutu mu (info@…) yoksa kişiye ait mi? Kişisel adresler LeadContact'ta ayrı tutulur. */
 export function isGenericEmail(email: string | null | undefined): boolean {

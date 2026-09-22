@@ -25,6 +25,8 @@ import { isWhatsAppActive } from "@/server/services/whatsapp";
 import { ActionButton } from "@/components/action-button";
 import { formatMoney } from "@/lib/cn";
 import { ComplianceReviewForm, ManualReplyForm, ResearchLeadButton, ScoreLeadsButton } from "../lead-forms";
+import { CALL_OUTCOME_LABELS, listLeadCalls } from "@/server/services/calls";
+import { CallResultForm } from "../../calls/call-forms";
 
 export const metadata: Metadata = { title: "Lead" };
 
@@ -83,13 +85,14 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   }
   // Uyum kayıtlarını güncel tut (adres / engel listesi değişmiş olabilir); ucuz, AI kullanmaz
   if (can(ctx, "lead.write")) await refreshLeadCompliance(ctx.companyId, id);
-  const [activeJob, lastError, compliance, conversations, followUps, crm] = await Promise.all([
+  const [activeJob, lastError, compliance, conversations, followUps, crm, calls] = await Promise.all([
     getActiveLeadJob(ctx, id),
     getLastLeadJobError(ctx, id),
     listLeadCompliance(ctx, id),
     listConversations(ctx, { leadId: id }),
     listFollowUps(ctx, { leadId: id }),
     getLeadCrm(ctx, id),
+    listLeadCalls(ctx, id),
   ]);
   const waActive = await isWhatsAppActive(ctx.companyId);
   const canReview = can(ctx, "compliance.review");
@@ -384,6 +387,35 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               </dl>
             </CardBody>
           </Card>
+
+          {(lead.phone || calls.length > 0) && (
+            <Card>
+              <CardHeader title={`Telefon görüşmeleri (${calls.length})`} description="Sözlü izinler (WhatsApp / e-posta) kim ve ne zaman bilgisiyle burada kayıtlıdır." />
+              {calls.length > 0 && (
+                <ul className="divide-y divide-border border-t border-border text-sm">
+                  {calls.map((c) => (
+                    <li key={c.id} className="px-5 py-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-medium">{CALL_OUTCOME_LABELS[c.outcome]}</span>
+                        <span className="text-xs text-text-3">{c.createdAt.toLocaleString("tr-TR", { timeZone: "Europe/Istanbul", dateStyle: "short", timeStyle: "short" })}</span>
+                      </div>
+                      {c.note && <p className="mt-0.5 text-xs text-text-2">{c.note}</p>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {canWrite && lead.phone && (
+                <CardBody className="border-t border-border">
+                  <details>
+                    <summary className="cursor-pointer text-sm font-medium text-accent-text">Görüşme sonucu ekle</summary>
+                    <div className="mt-3">
+                      <CallResultForm leadId={lead.id} />
+                    </div>
+                  </details>
+                </CardBody>
+              )}
+            </Card>
+          )}
 
           <Card>
             <CardHeader

@@ -2,6 +2,7 @@
 
 import {
   createLeadAction,
+  findEmailsAction,
   importLeadsCsvAction,
   researchLeadAction,
   scoreLeadsAction,
@@ -173,6 +174,24 @@ export function ComplianceReviewForm({ recordId, leadId }: { recordId: string; l
             </Select>
             <SubmitButton size="sm" variant="secondary" pendingText="Kaydediliyor…">İnceledim, kaydet</SubmitButton>
           </div>
+          <FormMessage state={state} />
+        </>
+      )}
+    </ActionForm>
+  );
+}
+
+export function FindEmailsButton({ leadIds }: { leadIds: string[] }) {
+  return (
+    <ActionForm action={findEmailsAction} className="gap-2">
+      {(state) => (
+        <>
+          {leadIds.map((id) => (
+            <input key={id} type="hidden" name="leadId" value={id} />
+          ))}
+          <SubmitButton variant="secondary" size="sm" pendingText="Başlatılıyor…">
+            <Search className="size-4" aria-hidden /> {leadIds.length} firmanın sitesinde e-posta bul (ücretsiz)
+          </SubmitButton>
           <FormMessage state={state} />
         </>
       )}

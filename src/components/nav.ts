@@ -3,6 +3,7 @@ export const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: "LayoutDashboard", phase: 1 },
   { href: "/assistant", label: "AI Assistant", icon: "Sparkles", phase: 1 },
   { href: "/leads", label: "Leads", icon: "Building2", phase: 1 },
+  { href: "/calls", label: "Arama listesi", icon: "PhoneCall", phase: 1 },
   { href: "/campaigns", label: "Campaigns", icon: "Megaphone", phase: 1 },
   { href: "/pipeline", label: "Pipeline", icon: "KanbanSquare", phase: 1 },
   { href: "/proposals", label: "Proposals", icon: "FileText", phase: 1 },

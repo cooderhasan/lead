@@ -315,3 +315,28 @@ export function specsToText(specs: unknown): string {
     .map(([k, v]) => `${k}: ${String(v)}`)
     .join("\n");
 }
+
+export const CALL_OUTCOMES = [
+  "NO_ANSWER",
+  "BUSY",
+  "WRONG_NUMBER",
+  "CALL_BACK",
+  "NOT_INTERESTED",
+  "INTERESTED",
+  "CATALOG_REQUESTED",
+  "MEETING_SET",
+  "WHATSAPP_CONSENT",
+  "EMAIL_OBTAINED",
+  "DO_NOT_CALL",
+] as const;
+
+export const callLogSchema = z.object({
+  leadId: z.string().min(1),
+  outcome: z.enum(CALL_OUTCOMES, { errorMap: () => ({ message: "Görüşme sonucunu seçin" }) }),
+  note: optText(2000),
+  /** İstemci yerel saati ISO'ya çevirip gönderir (sunucu UTC'dir) */
+  at: optDate,
+  mobilePhone: optText(40),
+  contactName: optText(200),
+  email: optText(300),
+});

@@ -11,6 +11,7 @@ import {
   FileText,
   KanbanSquare,
   LayoutDashboard,
+  PhoneCall,
   LineChart,
   ListChecks,
   Mail,
@@ -30,6 +31,7 @@ import { cn } from "@/lib/cn";
 const ICONS: Record<NavIcon, LucideIcon> = {
   FileText,
   LayoutDashboard,
+  PhoneCall,
   Sparkles,
   Building2,
   Megaphone,

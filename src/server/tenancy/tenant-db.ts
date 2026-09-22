@@ -36,6 +36,7 @@ export const TENANT_MODELS = new Set<Prisma.ModelName>([
   "ConversationMessage",
   "Opportunity",
   "Task",
+  "CallLog",
   "FollowUp",
   "Proposal",
   "Competitor",

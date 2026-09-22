@@ -27,7 +27,7 @@ import { evidenceFound, valueFound } from "./evidence";
 import { saveDiscoveredLeads } from "./leads";
 import { AppError } from "@/lib/errors";
 import { computeReachability, finalizeScore } from "@/lib/lead-scoring";
-import { isGenericEmail, normalizeEmail, normalizePhone } from "@/lib/lead-normalize";
+import { isGenericEmail, normalizeEmail, normalizePhone, pickCompanyEmail } from "@/lib/lead-normalize";
 
 const REFRESH_DAYS = 90;
 
@@ -306,7 +306,7 @@ export async function researchLead(companyId: string, leadId: string, progress?:
 
   let crawl;
   try {
-    crawl = await crawlSite(lead.website, { maxPages: 4, allowPrivateHosts: allowPrivateFetch() });
+    crawl = await crawlSite(lead.website, { maxPages: 4, ensureContactPage: true, allowPrivateHosts: allowPrivateFetch() });
   } catch (err) {
     if (err instanceof FetchBlockedError) throw new AppError("EXTERNAL_FETCH", err.message);
     throw new AppError("EXTERNAL_FETCH", `Lead sitesine ulaşılamadı: ${(err as Error).message}`);
@@ -347,7 +347,8 @@ export async function researchLead(companyId: string, leadId: string, progress?:
       subIndustry: lead.subIndustry ?? data.subIndustry,
       employeeCountMin: lead.employeeCountMin ?? v.employeeCountMin,
       employeeCountMax: lead.employeeCountMax ?? v.employeeCountMax,
-      genericEmail: lead.genericEmail ?? v.genericEmail,
+      // Önce sayfalarda gerçekten bulunan adres (mailto / metin / Cloudflare), sonra AI'ın bulup metinde doğrulananı
+      genericEmail: lead.genericEmail ?? pickCompanyEmail(crawl.pages.flatMap((p) => p.emails), lead.website) ?? v.genericEmail,
       phone: lead.phone ?? v.phone,
       normalizedPhone: lead.normalizedPhone ?? normalizePhone(v.phone),
       linkedin: lead.linkedin ?? (social.linkedin && valueFound(social.linkedin, corpus) ? social.linkedin : null),
@@ -580,4 +581,55 @@ export async function getLastLeadJobError(ctx: TenantContext, leadId: string) {
     select: { status: true, error: true, finishedAt: true },
   });
   return job?.status === "FAILED" ? job : null;
+}
+
+// ── 5) Web sitesinden kurumsal e-posta bulma (AI'sız, ücretsiz) ────────
+
+const EMAIL_DISCOVERY_MAX = 50;
+
+/**
+ * Web sitesi olan ama e-postası olmayan lead'lerin sitesini (ana sayfa + iletişim) tarar ve
+ * sayfada yazan kurumsal adresi (info@, satinalma@…) kaydeder. AI veya ücretli API kullanmaz → kredi düşmez.
+ */
+export async function startEmailDiscovery(ctx: TenantContext, leadIds: string[]) {
+  assertCan(ctx, "lead.write");
+  const db = tenantDb(ctx);
+  const ids = [...new Set(leadIds)].slice(0, 200);
+  const targets = await db.lead.findMany({
+    where: { id: { in: ids }, website: { not: null }, genericEmail: null },
+    select: { id: true },
+    take: EMAIL_DISCOVERY_MAX,
+  });
+  if (targets.length === 0) throw new AppError("VALIDATION", "Web sitesi olup e-postası eksik lead yok.");
+  const running = await db.job.findFirst({ where: { type: "lead.find_email", status: { in: ["QUEUED", "RUNNING"] } }, select: { id: true } });
+  if (running) throw new AppError("CONFLICT", "E-posta araması zaten sürüyor. Birkaç dakika sonra sayfayı yenileyin.");
+
+  const jobId = await enqueue("lead.find_email", { leadIds: targets.map((t) => t.id) }, { companyId: ctx.companyId, createdById: ctx.userId, maxAttempts: 1 });
+  await audit({ companyId: ctx.companyId, userId: ctx.userId, action: "lead.email_discovery.started", metadata: { count: targets.length } });
+  return { jobId, count: targets.length };
+}
+
+/** İş içinden çağrılır. Bir sitenin hatası diğerlerini durdurmaz. */
+export async function findLeadEmails(companyId: string, leadIds: string[], progress?: (pct: number) => Promise<void>) {
+  const db = tenantDb({ companyId });
+  let found = 0;
+  let notFound = 0;
+  let failed = 0;
+  for (const [i, leadId] of leadIds.entries()) {
+    const lead = await db.lead.findUnique({ where: { id: leadId }, select: { id: true, website: true, genericEmail: true } });
+    if (!lead?.website || lead.genericEmail) continue;
+    try {
+      const crawl = await crawlSite(lead.website, { maxPages: 3, ensureContactPage: true, allowPrivateHosts: allowPrivateFetch() });
+      const email = pickCompanyEmail(crawl.pages.flatMap((p) => p.emails), lead.website);
+      if (email) {
+        // Bu arada elle girilmiş adres varsa üzerine yazılmaz
+        const res = await db.lead.updateMany({ where: { id: leadId, genericEmail: null }, data: { genericEmail: email } });
+        if (res.count) found++;
+      } else notFound++;
+    } catch {
+      failed++;
+    }
+    await progress?.(Math.round(((i + 1) / leadIds.length) * 100));
+  }
+  return { found, notFound, failed };
 }

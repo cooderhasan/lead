@@ -154,6 +154,21 @@ enum ComplianceStatus {
   DO_NOT_SEND
 }
 
+/// Telefon araması sonucu (arama listesi)
+enum CallOutcome {
+  NO_ANSWER
+  BUSY
+  WRONG_NUMBER
+  CALL_BACK
+  NOT_INTERESTED
+  INTERESTED
+  CATALOG_REQUESTED
+  MEETING_SET
+  WHATSAPP_CONSENT
+  EMAIL_OBTAINED
+  DO_NOT_CALL
+}
+
 enum SuppressionType {
   EMAIL
   DOMAIN
@@ -420,6 +435,7 @@ model Company {
   conversationMsgs   ConversationMessage[]
   opportunities      Opportunity[]
   tasks              Task[]
+  callLogs           CallLog[]
   followUps          FollowUp[]
   proposals          Proposal[]
   competitors        Competitor[]
@@ -719,7 +735,7 @@ model Industry {
 // ─────────────────────────────────────────────────────────────
 
 model Lead {
-  id               String     @id @default(cuid())
+  id               String       @id @default(cuid())
   companyId        String
   companyName      String
   normalizedName   String
@@ -743,20 +759,26 @@ model Lead {
   socialProfiles   Json?
   employeeCountMin Int?
   employeeCountMax Int?
-  status           LeadStatus @default(NEW)
+  status           LeadStatus   @default(NEW)
   fitScore         Int?
-  suppressed       Boolean    @default(false)
+  suppressed       Boolean      @default(false)
   aiSummary        String?
   /// AI araştırma çıktısı: {verified:[…], assumptions:[…]} ayrımıyla
   enrichment       Json?
-  discoveredAt     DateTime   @default(now())
+  discoveredAt     DateTime     @default(now())
   lastVerifiedAt   DateTime?
   nextRefreshAt    DateTime?
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
+  /// Arama listesi: bir sonraki arama zamanı, son sonuç; callAttempts = arka arkaya ulaşılamayan deneme
+  nextCallAt       DateTime?
+  lastCallAt       DateTime?
+  lastCallOutcome  CallOutcome?
+  callAttempts     Int          @default(0)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 
   company       Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
   industryRef   Industry?          @relation(fields: [industryId], references: [id], onDelete: SetNull)
+  calls         CallLog[]
   contacts      LeadContact[]
   sources       LeadSource[]
   signals       LeadSignal[]
@@ -1047,12 +1069,12 @@ model ConversationMessage {
 /// IMAP posta kutusu okuma imleci (platform düzeyi, şirkete ait değil). Son işlenen UID burada tutulur;
 /// posta kutusundaki iletilere dokunulmaz (okundu işareti konmaz).
 model MailboxCursor {
-  id          String   @id
+  id          String    @id
   uidValidity BigInt
   lastUid     Int
   lastPollAt  DateTime?
   lastError   String?
-  updatedAt   DateTime @updatedAt
+  updatedAt   DateTime  @updatedAt
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1086,6 +1108,26 @@ model Opportunity {
 
   @@index([companyId, stage])
   @@index([companyId, leadId])
+}
+
+/// Telefon görüşmesi kaydı. Sözlü izin (WhatsApp / e-posta) bu kayıtla belgelenir.
+model CallLog {
+  id         String      @id @default(cuid())
+  companyId  String
+  leadId     String
+  userId     String?
+  outcome    CallOutcome
+  note       String?
+  /// Aranan numara (E.164)
+  phone      String?
+  nextCallAt DateTime?
+  createdAt  DateTime    @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  lead    Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, leadId, createdAt])
+  @@index([companyId, createdAt])
 }
 
 model Task {

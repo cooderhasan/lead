@@ -16,6 +16,8 @@ export interface JobPayloads {
   "lead.enrich": { leadId: string; usageId?: string };
   /** Toplu puanlama (araştırma yapmadan, mevcut veriyle) */
   "lead.score": { leadIds: string[]; usageId?: string };
+  /** Web sitesinden kurumsal e-posta bulma (AI'sız, kredi düşmez) */
+  "lead.find_email": { leadIds: string[] };
   /** Kampanya stratejisi (AI) — sonuç PENDING, insan onayı bekler */
   "campaign.strategy": { campaignId: string; usageId?: string };
   /** Kampanya ilk temas mesajları (AI) — her mesaj PENDING_APPROVAL */

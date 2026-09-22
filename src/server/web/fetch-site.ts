@@ -166,12 +166,31 @@ export function isAllowedByRobots(path: string, rules: RobotsRule[]): boolean {
 const EMAIL_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi;
 const PHONE_RE = /(?:\+?90[\s-]?)?\(?0?\s?[2-5]\d{2}\)?[\s.-]?\d{3}[\s.-]?\d{2}[\s.-]?\d{2}/g;
 
+/** Cloudflare'in XOR ile gizlediği e-posta adresini çözer (ilk bayt anahtardır). */
+export function decodeCfEmail(hex: string): string | null {
+  if (!/^[0-9a-f]{4,}$/i.test(hex) || hex.length % 2) return null;
+  const key = parseInt(hex.slice(0, 2), 16);
+  let out = "";
+  for (let i = 2; i < hex.length; i += 2) out += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16) ^ key);
+  const email = out.trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/.test(email) ? email : null;
+}
+
 export function extractPage(html: string, pageUrl: URL): PageContent {
   const $ = cheerio.load(html);
   const emails = new Set<string>();
   const phones = new Set<string>();
   $("a[href^='mailto:']").each((_, el) => {
     const v = ($(el).attr("href") ?? "").replace(/^mailto:/i, "").split("?")[0]?.trim().toLowerCase();
+    if (v) emails.add(v);
+  });
+  // Cloudflare e-posta gizleme: <a href="/cdn-cgi/l/email-protection#…"> ve <span data-cfemail="…">
+  $("[data-cfemail]").each((_, el) => {
+    const v = decodeCfEmail($(el).attr("data-cfemail") ?? "");
+    if (v) emails.add(v);
+  });
+  $("a[href*='/cdn-cgi/l/email-protection#']").each((_, el) => {
+    const v = decodeCfEmail(($(el).attr("href") ?? "").split("#")[1] ?? "");
     if (v) emails.add(v);
   });
   $("a[href^='tel:']").each((_, el) => {
@@ -220,6 +239,8 @@ export function extractPage(html: string, pageUrl: URL): PageContent {
   };
 }
 
+const CONTACT_PATH = /iletisim|iletişim|contact|bize-ula|ulasim|ulaşım/i;
+
 /** Şirket tanımak için öncelikli sayfa anahtar kelimeleri (TR + EN). */
 const PRIORITY_KEYWORDS = [
   "hakkimizda", "hakkımızda", "kurumsal", "about", "company",
@@ -258,7 +279,7 @@ export interface CrawlResult {
  * Şirket sitesini tarar: ana sayfa + en fazla `maxPages - 1` öncelikli iç sayfa.
  * robots.txt'ye uyar; sayfalar arası kısa bekleme yapar.
  */
-export async function crawlSite(input: string, opts: FetchOptions & { maxPages?: number } = {}): Promise<CrawlResult> {
+export async function crawlSite(input: string, opts: FetchOptions & { maxPages?: number; ensureContactPage?: boolean } = {}): Promise<CrawlResult> {
   const maxPages = opts.maxPages ?? 6;
   const start = normalizeUrl(input);
   const skipped: CrawlResult["skipped"] = [];
@@ -281,7 +302,13 @@ export async function crawlSite(input: string, opts: FetchOptions & { maxPages?:
   const homePage = extractPage(home.body, home.finalUrl);
   const pages: PageContent[] = [homePage];
 
-  for (const link of rankLinks(homePage.links, home.finalUrl)) {
+  let ranked = rankLinks(homePage.links, home.finalUrl);
+  if (opts.ensureContactPage) {
+    // İletişim sayfası e-posta / telefon için en değerli sayfadır → sayfa sınırına takılmasın
+    const contact = ranked.find((l) => CONTACT_PATH.test(decodeURIComponent(new URL(l).pathname)));
+    if (contact) ranked = [contact, ...ranked.filter((l) => l !== contact)];
+  }
+  for (const link of ranked) {
     if (pages.length >= maxPages) break;
     const u = new URL(link);
     if (!isAllowedByRobots(u.pathname + u.search, disallowed)) {

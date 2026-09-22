@@ -13,7 +13,7 @@ import { JobPoller } from "@/components/job-poller";
 import { Alert, Badge, Card, CardBody, CardHeader, EmptyState, Input, LinkButton, PageHeader, Select, Stat, buttonClass } from "@/components/ui";
 import { LEAD_STATUSES } from "@/lib/validation";
 import { scoreTone } from "@/lib/lead-scoring";
-import { CsvImportForm, LeadSearchForm, ScoreLeadsButton } from "./lead-forms";
+import { CsvImportForm, FindEmailsButton, LeadSearchForm, ScoreLeadsButton } from "./lead-forms";
 
 export const metadata: Metadata = { title: "Leads" };
 
@@ -46,6 +46,7 @@ export default async function LeadsPage({
   const aiReady = isAIConfigured();
   const running = searches.find((s) => s.status === "QUEUED" || s.status === "RUNNING");
   const unscored = rows.filter((r) => r.fitScore === null).map((r) => r.id);
+  const missingEmail = rows.filter((r) => r.website && !r.genericEmail).map((r) => r.id);
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const qs = (p: number) => {
     const u = new URLSearchParams();
@@ -145,9 +146,12 @@ export default async function LeadsPage({
           <button type="submit" className={buttonClass("secondary")}>Filtrele</button>
         </form>
         {/* Filtre formunun DIŞINDA olmalı: iç içe <form> geçersizdir, tarayıcı butonu dış formu (filtre) gönderir */}
-        {canWrite && aiReady && unscored.length > 0 && (
-          <div className="flex justify-end border-b border-border px-5 py-3">
-            <ScoreLeadsButton leadIds={unscored} label={`Bu sayfadaki ${unscored.length} lead'i puanla (${unscored.length} kredi)`} />
+        {canWrite && ((aiReady && unscored.length > 0) || missingEmail.length > 0) && (
+          <div className="flex flex-wrap justify-end gap-3 border-b border-border px-5 py-3">
+            {missingEmail.length > 0 && <FindEmailsButton leadIds={missingEmail} />}
+            {aiReady && unscored.length > 0 && (
+              <ScoreLeadsButton leadIds={unscored} label={`Bu sayfadaki ${unscored.length} lead'i puanla (${unscored.length} kredi)`} />
+            )}
           </div>
         )}
 

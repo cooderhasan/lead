@@ -7,6 +7,7 @@ import { parseForm, safeAction } from "@/server/actions/safe-action";
 import { createManualLead, deleteLead, updateLeadStatus } from "@/server/services/leads";
 import {
   importLeadsCsv,
+  startEmailDiscovery,
   startLeadResearch,
   startLeadScoring,
   startLeadSearch,
@@ -80,6 +81,16 @@ export async function scoreLeadsAction(_: ActionState, fd: FormData): Promise<Ac
     revalidatePath("/leads");
     for (const id of ids.slice(0, 1)) revalidatePath(`/leads/${id}`);
     return { ok: true, message: `${res.count} lead puanlanıyor (${res.cost} kredi).` };
+  });
+}
+
+export async function findEmailsAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  return safeAction(async () => {
+    const ctx = await requireTenant();
+    const ids = fd.getAll("leadId").filter((v): v is string => typeof v === "string" && v.length > 0);
+    const res = await startEmailDiscovery(ctx, ids);
+    revalidatePath("/leads");
+    return { ok: true, message: `${res.count} firmanın sitesinde e-posta aranıyor. Birkaç dakika sonra sayfayı yenileyin.` };
   });
 }
 
