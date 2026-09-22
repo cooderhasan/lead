@@ -90,7 +90,7 @@ export async function findEmailsAction(_: ActionState, fd: FormData): Promise<Ac
     const ids = fd.getAll("leadId").filter((v): v is string => typeof v === "string" && v.length > 0);
     const res = await startEmailDiscovery(ctx, ids);
     revalidatePath("/leads");
-    return { ok: true, message: `${res.count} firmanın sitesinde e-posta aranıyor. Birkaç dakika sonra sayfayı yenileyin.` };
+    return { ok: true, message: `${res.count} firmanın sitesinde e-posta aranıyor; ilerleme ve sonuç listenin üstünde görünecek.` };
   });
 }
 

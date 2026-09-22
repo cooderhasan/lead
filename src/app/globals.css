@@ -1,48 +1,60 @@
 @import "tailwindcss";
 
 /* ── Tasarım token'ları ─────────────────────────────────────────
-   Sade, veri odaklı B2B SaaS paleti: nötr gri zemin + tek vurgu rengi (indigo). */
+   Sade, veri odaklı B2B SaaS paleti: nötr zemin, katmanlı yüzeyler, tek vurgu rengi (indigo → mor). */
 :root {
-  --bg: #f7f7f8;
+  --bg: #f5f6f8;
   --surface: #ffffff;
-  --surface-2: #f2f3f5;
-  --border: #e4e5e9;
-  --text: #16181d;
-  --text-2: #5b606b;
-  --text-3: #8a8f99;
+  --surface-2: #f1f3f6;
+  --surface-3: #e9ecf1;
+  --border: #e2e5ea;
+  --border-strong: #cfd4dc;
+  --text: #0f1218;
+  --text-2: #4f5563;
+  --text-3: #848a96;
   --accent: #4f46e5;
+  --accent-2: #7c3aed;
   --accent-hover: #4338ca;
   --accent-soft: #eef0ff;
   --accent-text: #3730a3;
   --success: #0f7b4b;
-  --success-soft: #e7f6ee;
+  --success-soft: #e6f6ee;
   --warning: #9a5b00;
-  --warning-soft: #fff4e0;
+  --warning-soft: #fff3dc;
   --danger: #c0262d;
   --danger-soft: #fdecec;
   --ring: rgba(79, 70, 229, 0.35);
+  --card-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.05);
+  --pop-shadow: 0 12px 32px -12px rgba(16, 24, 40, 0.25);
+  --glow: rgba(79, 70, 229, 0.07);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0e0f12;
-    --surface: #16181d;
-    --surface-2: #1d2027;
-    --border: #2a2e37;
-    --text: #eceef2;
-    --text-2: #a4a9b4;
-    --text-3: #737985;
-    --accent: #7c74ff;
-    --accent-hover: #948dff;
-    --accent-soft: #23234a;
-    --accent-text: #c3c0ff;
+    --bg: #0a0b0f;
+    --surface: #12141a;
+    --surface-2: #191c24;
+    --surface-3: #21252f;
+    --border: #252a35;
+    --border-strong: #343a47;
+    --text: #eef0f4;
+    --text-2: #a3a9b5;
+    --text-3: #6f7683;
+    --accent: #7b72ff;
+    --accent-2: #a78bfa;
+    --accent-hover: #938bff;
+    --accent-soft: #1f1f45;
+    --accent-text: #c4c0ff;
     --success: #4cc38a;
-    --success-soft: #133024;
+    --success-soft: #11291f;
     --warning: #f0b35a;
-    --warning-soft: #33260f;
+    --warning-soft: #2e230f;
     --danger: #ff6b70;
-    --danger-soft: #3a1618;
-    --ring: rgba(124, 116, 255, 0.45);
+    --danger-soft: #361618;
+    --ring: rgba(123, 114, 255, 0.45);
+    --card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    --pop-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.6);
+    --glow: rgba(123, 114, 255, 0.09);
   }
 }
 
@@ -50,11 +62,14 @@
   --color-bg: var(--bg);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-text: var(--text);
   --color-text-2: var(--text-2);
   --color-text-3: var(--text-3);
   --color-accent: var(--accent);
+  --color-accent-2: var(--accent-2);
   --color-accent-hover: var(--accent-hover);
   --color-accent-soft: var(--accent-soft);
   --color-accent-text: var(--accent-text);
@@ -64,7 +79,9 @@
   --color-warning-soft: var(--warning-soft);
   --color-danger: var(--danger);
   --color-danger-soft: var(--danger-soft);
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --shadow-card: var(--card-shadow);
+  --shadow-pop: var(--pop-shadow);
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
 html,
@@ -76,7 +93,22 @@ body {
 body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
-  font-feature-settings: "tnum" 1;
+  font-feature-settings: "cv11" 1, "ss01" 1;
+  /* Üstte hafif vurgu parıltısı — düz zemini canlandırır, içerikle yarışmaz */
+  background-image: radial-gradient(1200px 400px at 60% -120px, var(--glow), transparent 70%);
+  background-repeat: no-repeat;
+}
+
+/* Sayılar hizalı dursun (tablolar, istatistikler) */
+.tabular,
+table,
+[data-numeric] {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Grid öğeleri içeriği yüzünden taşmasın (uzun metin → yatay kaydırma hatası) */
+:where(.grid) > * {
+  min-width: 0;
 }
 
 :focus-visible {
@@ -86,4 +118,19 @@ body {
 
 ::selection {
   background: var(--accent-soft);
+}
+
+/* İnce, temaya uyan kaydırma çubukları */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

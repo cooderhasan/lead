@@ -3,7 +3,7 @@ import { rawDb } from "@/server/db";
 import { drainInlineJobs } from "@/server/jobs/queue";
 import { saveDiscoveredLeads } from "@/server/services/leads";
 import { listCallQueue, logCall } from "@/server/services/calls";
-import { findLeadEmails, startEmailDiscovery } from "@/server/services/lead-intelligence";
+import { findLeadEmails, getLastEmailDiscovery, startEmailDiscovery } from "@/server/services/lead-intelligence";
 import { pickCompanyEmail } from "@/lib/lead-normalize";
 import { decodeCfEmail, extractPage } from "@/server/web/fetch-site";
 import type { TenantContext } from "@/server/tenancy/types";
@@ -82,6 +82,9 @@ describe("kurumsal e-posta seçimi", () => {
     const res = await startEmailDiscovery(a, [ok!, hasEmail!, other!]);
     expect(res.count).toBe(1);
     await drainInlineJobs();
+    // Özet: .invalid siteye ulaşılamaz → "ulaşılamadı" sayılır; B şirketi A'nın aramasını görmez
+    expect(await getLastEmailDiscovery(a)).toMatchObject({ status: "SUCCEEDED", total: 1, found: 0, notFound: 0, failed: 1 });
+    expect(await getLastEmailDiscovery(b)).toBeNull();
     const viewer = await createTenant("V", "VIEWER");
     await expect(startEmailDiscovery(viewer, [ok!])).rejects.toThrow();
   });

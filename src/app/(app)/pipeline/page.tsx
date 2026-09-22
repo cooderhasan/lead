@@ -11,7 +11,7 @@ import { OpportunityForm } from "./crm-forms";
 import { ActionButton } from "@/components/action-button";
 import { startProposalAction } from "@/app/actions/proposals";
 
-export const metadata: Metadata = { title: "Pipeline" };
+export const metadata: Metadata = { title: "Satış hunisi" };
 
 const toDateInput = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
 
@@ -27,7 +27,7 @@ export default async function PipelinePage() {
   return (
     <>
       <PageHeader
-        title="Pipeline"
+        title="Satış hunisi"
         description="Olumlu yanıtlar otomatik fırsata dönüşür. Tutarı ve aşamayı siz güncellersiniz — AI tutar tahmin etmez."
       />
       <Card className="mb-6">

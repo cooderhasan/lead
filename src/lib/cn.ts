@@ -1,6 +1,8 @@
 import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
 
-export const cn = (...inputs: ClassValue[]) => clsx(inputs);
+/** Koşullu sınıflar + çakışan Tailwind sınıflarının birleştirilmesi (sonraki kazanır: "w-full" + "w-44" → "w-44") */
+export const cn = (...inputs: ClassValue[]) => twMerge(clsx(inputs));
 
 export const formatNumber = (n: number) => new Intl.NumberFormat("tr-TR").format(n);
 

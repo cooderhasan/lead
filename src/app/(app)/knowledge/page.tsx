@@ -28,7 +28,7 @@ export default async function KnowledgePage({ searchParams }: { searchParams: Pr
   return (
     <>
       <PageHeader
-        title="Knowledge Base"
+        title="Bilgi bankası"
         description="Katalog, ürün listesi ve teknik dokümanlarınız. AI yalnızca kendi şirketinizin bilgi bankasını kullanır."
       />
 

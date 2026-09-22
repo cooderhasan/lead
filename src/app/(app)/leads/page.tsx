@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Building2, Plus } from "lucide-react";
+import { Building2, Globe, Mail, Phone, Plus, Send, Star, Target } from "lucide-react";
 import type { LeadStatus } from "@prisma/client";
 import { requireTenantPage } from "@/server/tenancy/context";
 import { can } from "@/server/tenancy/permissions";
@@ -8,14 +8,15 @@ import { env } from "@/server/env";
 import { isLeadSourceConfigured } from "@/server/providers/lead-source";
 import { isAIConfigured } from "@/server/ai";
 import { LEAD_STATUS_LABELS, leadStats, listLeads } from "@/server/services/leads";
-import { listRecentSearches } from "@/server/services/lead-intelligence";
+import { getLastEmailDiscovery, listRecentSearches } from "@/server/services/lead-intelligence";
 import { JobPoller } from "@/components/job-poller";
-import { Alert, Badge, Card, CardBody, CardHeader, EmptyState, Input, LinkButton, PageHeader, Select, Stat, buttonClass } from "@/components/ui";
+import { Alert, Badge, Card, CardBody, CardHeader, EmptyState, Input, LinkButton, PageHeader, Select, StatCard, buttonClass } from "@/components/ui";
+import { cn } from "@/lib/cn";
 import { LEAD_STATUSES } from "@/lib/validation";
 import { scoreTone } from "@/lib/lead-scoring";
 import { CsvImportForm, FindEmailsButton, LeadSearchForm, ScoreLeadsButton } from "./lead-forms";
 
-export const metadata: Metadata = { title: "Leads" };
+export const metadata: Metadata = { title: "Potansiyel müşteriler" };
 
 const PAGE_SIZE = 50;
 
@@ -36,11 +37,13 @@ export default async function LeadsPage({
   const minScore = sp.min ? Math.max(0, Math.min(100, Number(sp.min) || 0)) : undefined;
   const page = Math.max(1, Number(sp.page) || 1);
 
-  const [{ rows, total }, stats, searches] = await Promise.all([
+  const [{ rows, total }, stats, searches, emailRun] = await Promise.all([
     listLeads(ctx, { q: sp.q, status, minScore, take: PAGE_SIZE, skip: (page - 1) * PAGE_SIZE }),
     leadStats(ctx),
     listRecentSearches(ctx, 5),
+    getLastEmailDiscovery(ctx),
   ]);
+  const emailRunning = emailRun && (emailRun.status === "QUEUED" || emailRun.status === "RUNNING");
   const canWrite = can(ctx, "lead.write");
   const sourceReady = isLeadSourceConfigured();
   const aiReady = isAIConfigured();
@@ -60,7 +63,7 @@ export default async function LeadsPage({
   return (
     <>
       <PageHeader
-        title="Leads"
+        title="Potansiyel müşteriler"
         description="Potansiyel müşterileri bulun, araştırın ve puanlayın. Puanlar yalnızca doğrulanmış şirket bilgilerinize dayanır."
         actions={
           canWrite ? (
@@ -71,11 +74,11 @@ export default async function LeadsPage({
         }
       />
 
-      <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <Card><CardBody><Stat label="Toplam lead" value={stats.total} /></CardBody></Card>
-        <Card><CardBody><Stat label="Puanlanan" value={stats.scored} /></CardBody></Card>
-        <Card><CardBody><Stat label="Yüksek uyum (70+)" value={stats.qualified} /></CardBody></Card>
-        <Card><CardBody><Stat label="İletişime hazır" value={stats.contactReady} /></CardBody></Card>
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+        <StatCard label="Toplam lead" value={stats.total} icon={<Building2 />} tone="accent" />
+        <StatCard label="Puanlanan" value={stats.scored} icon={<Target />} />
+        <StatCard label="Yüksek uyum (70+)" value={stats.qualified} icon={<Star />} tone="success" />
+        <StatCard label="İletişime hazır" value={stats.contactReady} icon={<Send />} tone="warning" />
       </div>
 
       {canWrite && (
@@ -146,9 +149,22 @@ export default async function LeadsPage({
           <button type="submit" className={buttonClass("secondary")}>Filtrele</button>
         </form>
         {/* Filtre formunun DIŞINDA olmalı: iç içe <form> geçersizdir, tarayıcı butonu dış formu (filtre) gönderir */}
-        {canWrite && ((aiReady && unscored.length > 0) || missingEmail.length > 0) && (
+        {emailRun && (
+          <div className="border-b border-border px-5 py-3">
+            {emailRunning ? (
+              <JobPoller
+                jobId={emailRun.id}
+                label={`${emailRun.total} firmanın web sitesinde kurumsal e-posta aranıyor…`}
+                steps={[[0, "Siteler sırayla taranıyor (firma başına birkaç saniye)…"]]}
+              />
+            ) : (
+              <EmailDiscoverySummary run={emailRun} />
+            )}
+          </div>
+        )}
+        {canWrite && ((aiReady && unscored.length > 0) || (missingEmail.length > 0 && !emailRunning)) && (
           <div className="flex flex-wrap justify-end gap-3 border-b border-border px-5 py-3">
-            {missingEmail.length > 0 && <FindEmailsButton leadIds={missingEmail} />}
+            {missingEmail.length > 0 && !emailRunning && <FindEmailsButton leadIds={missingEmail} />}
             {aiReady && unscored.length > 0 && (
               <ScoreLeadsButton leadIds={unscored} label={`Bu sayfadaki ${unscored.length} lead'i puanla (${unscored.length} kredi)`} />
             )}
@@ -163,40 +179,41 @@ export default async function LeadsPage({
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-sm">
-              <thead className="border-b border-border text-left text-xs text-text-2">
+            <table className="w-full min-w-[640px] text-sm">
+              <thead className="border-b border-border bg-surface-2/50 text-left text-[11px] font-semibold uppercase tracking-wider text-text-3">
                 <tr>
-                  <th className="px-5 py-3 font-medium">Firma</th>
-                  <th className="px-3 py-3 font-medium">Konum</th>
-                  <th className="px-3 py-3 font-medium">Sektör</th>
-                  <th className="px-3 py-3 font-medium">Kaynak</th>
-                  <th className="px-3 py-3 font-medium">Durum</th>
-                  <th className="px-5 py-3 text-right font-medium">Puan</th>
+                  <th className="px-5 py-2.5">Firma</th>
+                  <th className="px-3 py-2.5 text-center">Puan</th>
+                  <th className="px-3 py-2.5">Konum</th>
+                  <th className="hidden px-3 py-2.5 lg:table-cell">Sektör</th>
+                  <th className="px-3 py-2.5">Durum</th>
+                  <th className="hidden px-5 py-2.5 xl:table-cell">Kaynak</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {rows.map((l) => (
-                  <tr key={l.id} className="hover:bg-surface-2">
-                    <td className="px-5 py-3">
-                      <Link href={`/leads/${l.id}`} className="font-medium text-text hover:text-accent">{l.companyName}</Link>
-                      <p className="truncate text-xs text-text-3">{l.domain ?? l.phone ?? "İletişim bilgisi yok"}</p>
-                    </td>
-                    <td className="px-3 py-3 text-text-2">{[l.district, l.city].filter(Boolean).join(", ") || "—"}</td>
-                    <td className="max-w-48 truncate px-3 py-3 text-text-2">{l.industry ?? "—"}</td>
-                    <td className="px-3 py-3">
-                      <div className="flex flex-wrap gap-1">
-                        {[...new Set(l.sources.map((s) => s.provider))].map((p) => (
-                          <Badge key={p}>{SOURCE_LABELS[p] ?? p}</Badge>
-                        ))}
+                  <tr key={l.id} className="group transition-colors hover:bg-surface-2/60">
+                    <td className="max-w-80 px-5 py-3">
+                      <Link href={`/leads/${l.id}`} className="line-clamp-2 font-medium text-text group-hover:text-accent-text">{l.companyName}</Link>
+                      <div className="mt-1 flex items-center gap-2.5 text-text-3">
+                        <ContactIcon on={Boolean(l.phone)} label={l.phone ?? "Telefon yok"}><Phone /></ContactIcon>
+                        <ContactIcon on={Boolean(l.genericEmail)} label={l.genericEmail ?? "E-posta yok"}><Mail /></ContactIcon>
+                        <ContactIcon on={Boolean(l.website)} label={l.domain ?? "Web sitesi yok"}><Globe /></ContactIcon>
+                        {l.domain && <span className="truncate text-xs">{l.domain}</span>}
                       </div>
                     </td>
-                    <td className="px-3 py-3 text-text-2">{LEAD_STATUS_LABELS[l.status]}</td>
-                    <td className="px-5 py-3 text-right">
-                      {l.fitScore === null ? (
-                        <span className="text-xs text-text-3">Puanlanmadı</span>
-                      ) : (
-                        <Badge tone={scoreTone(l.fitScore)}>{l.fitScore}</Badge>
-                      )}
+                    <td className="px-3 py-3 text-center">
+                      {l.fitScore === null ? <span className="text-xs text-text-3">—</span> : <ScorePill score={l.fitScore} />}
+                    </td>
+                    <td className="px-3 py-3 text-text-2">{[l.district, l.city].filter(Boolean).join(", ") || "—"}</td>
+                    <td className="hidden max-w-52 truncate px-3 py-3 text-text-2 lg:table-cell">{l.industry ?? "—"}</td>
+                    <td className="px-3 py-3"><Badge>{LEAD_STATUS_LABELS[l.status]}</Badge></td>
+                    <td className="hidden px-5 py-3 xl:table-cell">
+                      <div className="flex flex-wrap gap-1">
+                        {[...new Set(l.sources.map((s) => s.provider))].map((p) => (
+                          <span key={p} className="text-xs text-text-3">{SOURCE_LABELS[p] ?? p}</span>
+                        ))}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -215,5 +232,56 @@ export default async function LeadsPage({
         )}
       </Card>
     </>
+  );
+}
+
+function ContactIcon({ on, label, children }: { on: boolean; label: string; children: React.ReactNode }) {
+  return (
+    <span title={label} aria-label={label} className={cn("[&>svg]:size-3.5", on ? "text-success" : "text-text-3/50")}>
+      {children}
+    </span>
+  );
+}
+
+/** Puan: renkli halka + sayı (70+ yeşil, 45+ turuncu, altı kırmızı) */
+function ScorePill({ score }: { score: number }) {
+  const tone = scoreTone(score);
+  const color = tone === "success" ? "var(--success)" : tone === "warning" ? "var(--warning)" : "var(--danger)";
+  return (
+    <span
+      className="inline-grid size-9 place-items-center rounded-full text-xs font-semibold tabular-nums text-text"
+      style={{ background: `conic-gradient(${color} ${score * 3.6}deg, var(--surface-3) 0deg)` }}
+      title={`Uygunluk puanı: ${score}/100`}
+    >
+      <span className="grid size-7 place-items-center rounded-full bg-surface">{score}</span>
+    </span>
+  );
+}
+
+function EmailDiscoverySummary({ run }: { run: NonNullable<Awaited<ReturnType<typeof getLastEmailDiscovery>>> }) {
+  const when = run.finishedAt?.toLocaleString("tr-TR", { timeZone: "Europe/Istanbul", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  if (run.status !== "SUCCEEDED") {
+    return <Alert tone="danger">E-posta araması tamamlanamadı{run.error ? `: ${run.error}` : "."} Tekrar deneyebilirsiniz.</Alert>;
+  }
+  const missing = run.notFound + run.failed;
+  return (
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-text">
+          Son e-posta araması{when ? <span className="font-normal text-text-3"> · {when}</span> : null}
+        </p>
+        <div className="mt-1.5 flex flex-wrap gap-2">
+          <Badge tone="success">{run.found} firmada bulundu</Badge>
+          {run.notFound > 0 && <Badge>{run.notFound} sitede kurumsal adres yok</Badge>}
+          {run.failed > 0 && <Badge tone="warning">{run.failed} siteye ulaşılamadı</Badge>}
+          <span className="text-xs text-text-3 self-center">toplam {run.total} firma</span>
+        </div>
+      </div>
+      {missing > 0 && (
+        <LinkButton href="/calls?view=all&noEmail=1" variant="secondary" size="sm">
+          <Phone className="size-4" aria-hidden /> Bulunamayanları telefonla ara
+        </LinkButton>
+      )}
+    </div>
   );
 }

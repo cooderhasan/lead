@@ -92,9 +92,10 @@ describe("AI rapor", () => {
     );
     const res = await generateReport(a, 30);
     expect(res).toEqual({ created: 2, dropped: 2 });
-    const rows = await rawDb.aIInsight.findMany({ where: { companyId: a.companyId }, orderBy: { createdAt: "asc" } });
-    expect(rows.map((r) => r.title)).toEqual(["Son 30 gün özeti", "Yanıt oranı %20"]);
-    const basis = rows[1]!.dataBasis as { evidence: string[]; snapshot: { funnel: { emailsSent: number } } };
+    // Aynı milisaniyede oluşabilirler → sıraya değil başlığa göre kontrol
+    const rows = await rawDb.aIInsight.findMany({ where: { companyId: a.companyId } });
+    expect(rows.map((r) => r.title).sort()).toEqual(["Son 30 gün özeti", "Yanıt oranı %20"]);
+    const basis = rows.find((r) => r.title === "Yanıt oranı %20")!.dataBasis as { evidence: string[]; snapshot: { funnel: { emailsSent: number } } };
     expect(basis.evidence).toEqual(["rates.replyRatePct", "funnel.replies"]);
     expect(basis.snapshot.funnel.emailsSent).toBe(20);
   });

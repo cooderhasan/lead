@@ -633,3 +633,25 @@ export async function findLeadEmails(companyId: string, leadIds: string[], progr
   }
   return { found, notFound, failed };
 }
+
+/** Son 24 saatteki e-posta araması (liste üstünde özet / ilerleme için) */
+export async function getLastEmailDiscovery(ctx: TenantContext) {
+  const job = await tenantDb(ctx).job.findFirst({
+    where: { type: "lead.find_email", createdAt: { gte: new Date(Date.now() - 86_400_000) } },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, status: true, payload: true, result: true, error: true, finishedAt: true },
+  });
+  if (!job) return null;
+  const total = ((job.payload as { leadIds?: string[] } | null)?.leadIds ?? []).length;
+  const r = (job.result ?? {}) as { found?: number; notFound?: number; failed?: number };
+  return {
+    id: job.id,
+    status: job.status,
+    finishedAt: job.finishedAt,
+    error: job.error,
+    total,
+    found: r.found ?? 0,
+    notFound: r.notFound ?? 0,
+    failed: r.failed ?? 0,
+  };
+}
