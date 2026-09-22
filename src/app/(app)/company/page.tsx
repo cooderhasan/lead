@@ -7,10 +7,10 @@ import { listFacts } from "@/server/services/facts";
 import { getLatestOwnAnalysis } from "@/server/services/website-analysis";
 import { tenantDb } from "@/server/tenancy/tenant-db";
 import { FactReview, SummaryCard } from "@/components/fact-review";
-import { FactEditButton } from "@/components/fact-editors";
+import { FactAddButton, FactEditButton, FactRemoveButton } from "@/components/fact-editors";
 import { JobPoller } from "@/components/job-poller";
 import { Badge, Card, CardBody, CardHeader, EmptyState, LinkButton, PageHeader } from "@/components/ui";
-import { FACT_GROUP_ORDER, FACT_SOURCE_LABELS, factGroup, factLabel } from "@/lib/facts";
+import { FACT_GROUP_ORDER, FACT_KEYS, FACT_SOURCE_LABELS, factGroup, factLabel } from "@/lib/facts";
 import { formatDateTime, formatMoney } from "@/lib/cn";
 
 export const metadata: Metadata = { title: "Şirketim" };
@@ -139,21 +139,24 @@ export default async function CompanyPage() {
 
         <section>
           <h2 className="mb-3 text-base font-semibold">Onaylı bilgiler</h2>
-          {verified.length === 0 ? (
-            <Card><EmptyState title="Henüz onaylı bilgi yok" description="AI bulgularını onayladıkça burada görünür." /></Card>
-          ) : (
+          {verified.length === 0 && (
+            <p className="mb-3 text-sm text-text-2">Henüz onaylı bilgi yok. AI bulgularını onayladıkça veya aşağıdan elle ekledikçe burada görünür.</p>
+          )}
+          {(
             <div className="grid gap-4 lg:grid-cols-2">
-              {[...FACT_GROUP_ORDER, "Diğer"].filter((g) => verifiedByGroup.has(g)).map((g) => (
+              {[...FACT_GROUP_ORDER, "Diğer"].filter((g) => verifiedByGroup.has(g) || ADDABLE_GROUPS.includes(g)).map((g) => (
                 <Card key={g}>
-                  <CardHeader title={g} />
+                  <CardHeader title={g} action={<FactAddButton keys={keysOfGroup(g)} />} />
+                  {!verifiedByGroup.has(g) && <p className="px-5 py-3 text-sm text-text-3">Henüz bilgi yok.</p>}
                   <ul className="divide-y divide-border">
-                    {verifiedByGroup.get(g)!.map((f) => (
+                    {(verifiedByGroup.get(g) ?? []).map((f) => (
                       <li key={f.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-5 py-2.5">
                         <div className="min-w-0 flex-1">
                           <p className="text-xs text-text-3">{factLabel(f.key)} · {FACT_SOURCE_LABELS[f.source]}</p>
                           <p className="text-sm text-text">{f.value}</p>
                         </div>
                         <FactEditButton factId={f.id} value={f.value} />
+                        <FactRemoveButton factId={f.id} value={f.value} />
                       </li>
                     ))}
                   </ul>
@@ -172,4 +175,13 @@ export default async function CompanyPage() {
       </div>
     </>
   );
+}
+
+/** Boşken de gösterilen (elle bilgi eklenebilen) gruplar */
+const ADDABLE_GROUPS: string[] = ["Genel", "Ürünler", "Üretim ve kalite", "Hedef pazar", "Satış argümanları"];
+
+function keysOfGroup(group: string) {
+  return Object.entries(FACT_KEYS)
+    .filter(([, v]) => v.group === group)
+    .map(([key, v]) => ({ key, label: v.label }));
 }

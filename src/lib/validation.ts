@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { FACT_KEYS, type FactKey } from "./facts";
 
 /** "a, b\nc" → ["a","b","c"] — virgül veya satır sonuyla ayrılmış liste alanları. */
 export const listField = (max = 50, itemMax = 200) =>
@@ -159,6 +160,11 @@ export const productSchema = z.object({
 export const memorySchema = z.object({
   type: z.enum(["RULE", "PREFERENCE", "FACT"]),
   content: z.string().trim().min(5, "Kuralı en az birkaç kelimeyle yazın.").max(1000),
+});
+
+export const factAddSchema = z.object({
+  key: z.enum(Object.keys(FACT_KEYS) as [FactKey, ...FactKey[]], { errorMap: () => ({ message: "Bilgi türünü seçin" }) }),
+  value: z.string().trim().min(2, "Değer girin.").max(500),
 });
 
 export const factEditSchema = z.object({

@@ -56,6 +56,10 @@ export async function rejectFacts(ctx: TenantContext, factIds: string[]) {
 
 export async function addUserFact(ctx: TenantContext, key: string, value: string) {
   assertCan(ctx, "facts.review");
+  const existing = await tenantDb(ctx).companyFact.findMany({ where: { key, status: "VERIFIED" }, select: { value: true } });
+  const norm = (s: string) => s.toLocaleLowerCase("tr").replace(/\s+/g, " ").trim();
+  if (existing.some((f) => norm(f.value) === norm(value))) throw new AppError("CONFLICT", "Bu bilgi zaten kayıtlı.", { value: "Zaten var" });
+  await audit({ companyId: ctx.companyId, userId: ctx.userId, action: "fact.added", metadata: { key } });
   return tenantDb(ctx).companyFact.create({
     data: {
       companyId: ctx.companyId,

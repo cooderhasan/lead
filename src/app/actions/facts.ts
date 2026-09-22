@@ -3,8 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { requireTenant } from "@/server/tenancy/context";
 import { parseForm, safeAction } from "@/server/actions/safe-action";
-import { correctFact, promoteFactToProduct, rejectFacts, reviewSummary, verifyFacts } from "@/server/services/facts";
-import { factEditSchema } from "@/lib/validation";
+import { addUserFact, correctFact, promoteFactToProduct, rejectFacts, reviewSummary, verifyFacts } from "@/server/services/facts";
+import { factAddSchema, factEditSchema } from "@/lib/validation";
 import type { ActionState } from "@/lib/action-state";
 
 const refresh = () => {
@@ -35,6 +35,25 @@ export async function correctFactAction(_: ActionState, fd: FormData): Promise<A
     refresh();
     return { ok: true };
   });
+}
+
+/** Kullanıcının elle eklediği bilgi doğrudan onaylıdır (satış içeriğinde kullanılabilir) */
+export async function addFactAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  return safeAction(async () => {
+    const ctx = await requireTenant();
+    const { key, value } = parseForm(factAddSchema, fd);
+    await addUserFact(ctx, key, value);
+    refresh();
+    return { ok: true, message: "Eklendi." };
+  });
+}
+
+/** Onaylı bilgiyi kaldırır (reddedildi olarak işaretlenir; satış içeriğinde artık kullanılmaz) */
+export async function removeFactAction(fd: FormData) {
+  const ctx = await requireTenant();
+  const id = fd.get("factId");
+  if (typeof id === "string" && id) await rejectFacts(ctx, [id]);
+  refresh();
 }
 
 export async function verifySummaryAction() {

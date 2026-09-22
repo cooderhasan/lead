@@ -24,6 +24,7 @@ const ACTION_LABELS: Record<string, string> = {
   "fact.verified": "Bilgiler onaylandı",
   "fact.corrected": "Bilgi düzeltildi",
   "fact.rejected": "Bilgiler reddedildi",
+  "fact.added": "Şirket bilgisi eklendi",
   "product.created": "Ürün eklendi",
   "product.updated": "Ürün güncellendi",
   "product.verified": "Ürünler onaylandı",

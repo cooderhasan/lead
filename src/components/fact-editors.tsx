@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Pencil } from "lucide-react";
-import { correctFactAction, correctSummaryAction } from "@/app/actions/facts";
+import { Pencil, Plus, X } from "lucide-react";
+import { addFactAction, correctFactAction, correctSummaryAction, removeFactAction } from "@/app/actions/facts";
 import { ActionForm, SubmitButton } from "./forms";
-import { Button, Textarea } from "./ui";
+import { Button, Input, Select, Textarea } from "./ui";
 
 export function FactEditButton({ factId, value }: { factId: string; value: string }) {
   const [editing, setEditing] = useState(false);
@@ -31,6 +31,59 @@ export function FactEditButton({ factId, value }: { factId: string; value: strin
         )}
       </ActionForm>
     </div>
+  );
+}
+
+/** Bilgi grubuna yeni onaylı bilgi ekleme (ör. Hedef pazar → Hizmet verilen sektör: Raylı sistemler) */
+export function FactAddButton({ keys }: { keys: Array<{ key: string; label: string }> }) {
+  const [open, setOpen] = useState(false);
+  if (!open) {
+    return (
+      <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(true)}>
+        <Plus className="size-3.5" aria-hidden /> Ekle
+      </Button>
+    );
+  }
+  return (
+    <div className="w-full basis-full">
+      <ActionForm action={addFactAction} className="gap-2" resetOnSuccess>
+        {(state) => (
+          <>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Select name="key" defaultValue={keys[0]?.key} aria-label="Bilgi türü" className="sm:w-52">
+                {keys.map((k) => (
+                  <option key={k.key} value={k.key}>{k.label}</option>
+                ))}
+              </Select>
+              <Input name="value" required maxLength={500} autoFocus placeholder="ör. Raylı sistemler / Demiryolu" aria-label="Değer" className="flex-1" />
+            </div>
+            {state.error && <p className="text-xs text-danger">{state.error}</p>}
+            {state.ok && <p className="text-xs text-success">{state.message} Başka bir tane ekleyebilirsiniz.</p>}
+            <div className="flex gap-2">
+              <SubmitButton size="sm" pendingText="Ekleniyor…">Ekle</SubmitButton>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>Kapat</Button>
+            </div>
+          </>
+        )}
+      </ActionForm>
+    </div>
+  );
+}
+
+/** Onaylı bilgiyi kaldırma (onay sorar) */
+export function FactRemoveButton({ factId, value }: { factId: string; value: string }) {
+  return (
+    <form
+      action={removeFactAction}
+      onSubmit={(e) => {
+        if (!window.confirm(`"${value.slice(0, 80)}" kaldırılsın mı? Satış mesajlarında artık kullanılmaz.`)) e.preventDefault();
+      }}
+    >
+      <input type="hidden" name="factId" value={factId} />
+      <Button type="submit" variant="ghost" size="sm" aria-label="Kaldır" title="Kaldır" className="px-2 text-text-3 hover:text-danger">
+        <X className="size-3.5" aria-hidden />
+      </Button>
+    </form>
   );
 }
 
