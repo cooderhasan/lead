@@ -8,21 +8,23 @@ import { createManualLead, deleteLead, updateLeadContactInfo, updateLeadStatus }
 import {
   importLeadsCsv,
   startEmailDiscovery,
+  startListImport,
   startLeadResearch,
   startLeadScoring,
   startLeadSearch,
 } from "@/server/services/lead-intelligence";
 import { leadContactSchema, leadSearchFormSchema, leadStatusSchema, manualLeadSchema } from "@/lib/validation";
 import { AppError } from "@/lib/errors";
+import { LEAD_SOURCE_LABELS } from "@/server/providers/lead-source";
 import type { ActionState } from "@/lib/action-state";
 
 export async function searchLeadsAction(_: ActionState, fd: FormData): Promise<ActionState> {
   return safeAction(async () => {
     const ctx = await requireTenant();
     const input = parseForm(leadSearchFormSchema, fd);
-    const res = await startLeadSearch(ctx, input.prompt, input.limit);
+    const res = await startLeadSearch(ctx, input.prompt, input.limit, input.source);
     revalidatePath("/leads");
-    return { ok: true, message: `Arama başladı: ${res.interpretation} (en fazla ${res.reserved} lead)` };
+    return { ok: true, message: `Arama başladı (${LEAD_SOURCE_LABELS[res.source]}): ${res.interpretation} (en fazla ${res.reserved} lead)` };
   });
 }
 
@@ -37,6 +39,17 @@ export async function importLeadsCsvAction(_: ActionState, fd: FormData): Promis
     if (res.skipped > 0) parts.push(`${res.skipped} satır atlandı`);
     if (res.unknownHeaders.length > 0) parts.push(`tanınmayan sütunlar: ${res.unknownHeaders.slice(0, 5).join(", ")}`);
     return { ok: true, message: `${parts.join(" · ")}.` };
+  });
+}
+
+export async function importListAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  return safeAction(async () => {
+    const ctx = await requireTenant();
+    const url = String(fd.get("url") ?? "").trim();
+    const text = String(fd.get("text") ?? "").trim();
+    await startListImport(ctx, { url: url || null, text: text || null });
+    revalidatePath("/leads");
+    return { ok: true, message: "Liste işleniyor; ilerleme bu kartta görünecek." };
   });
 }
 

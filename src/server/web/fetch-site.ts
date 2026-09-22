@@ -370,3 +370,75 @@ export async function crawlSite(input: string, opts: FetchOptions & { maxPages?:
 
   return { homeUrl: home.finalUrl.toString(), pages, skipped };
 }
+
+// ── Liste sayfası (OSB üye listesi, fuar katılımcıları, dernek üyeleri) ─────
+
+const MAX_LIST_TEXT = 60_000;
+
+/**
+ * Tek bir liste sayfasını okur ve satır yapısını koruyan düz metne çevirir (tablo satırı → "a | b | c").
+ * robots.txt'ye uyar. Sayfadaki web sitesi / e-posta bağlantıları metnin sonuna eklenir (AI eşleştirebilsin).
+ */
+export async function fetchListPage(input: string, opts: FetchOptions = {}): Promise<{ finalUrl: string; text: string }> {
+  let start = normalizeUrl(input);
+  let disallowed: RobotsRule[] = [];
+  let reachable = false;
+  let lastError: unknown = null;
+  for (const candidate of originCandidates(start)) {
+    try {
+      const robots = await safeFetch(new URL("/robots.txt", candidate), { ...opts, timeoutMs: 8_000 });
+      start = candidate;
+      reachable = true;
+      if (robots.status === 200) disallowed = parseRobots(robots.body, USER_AGENT);
+      break;
+    } catch (err) {
+      if (err instanceof FetchBlockedError) throw err;
+      lastError = err;
+    }
+  }
+  if (!reachable) throw new Error(describeNetworkError(lastError));
+  if (!isAllowedByRobots(start.pathname + start.search, disallowed)) {
+    throw new FetchBlockedError("Bu sayfa robots.txt ile otomatik okumaya kapalı. Listeyi kopyalayıp metin olarak yapıştırabilirsiniz.");
+  }
+  const page = await safeFetch(start, { ...opts, timeoutMs: 20_000 });
+  if (page.status >= 400 || !page.body) throw new Error(`Sayfa açılamadı (HTTP ${page.status}).`);
+  return { finalUrl: page.finalUrl.toString(), text: htmlToListText(page.body, page.finalUrl) };
+}
+
+/** HTML → satır korumalı metin. Saf fonksiyon (testlerde doğrudan kullanılır). */
+export function htmlToListText(html: string, pageUrl: URL): string {
+  const $ = cheerio.load(html);
+  $("script, style, noscript, svg, iframe, template, head, nav, footer").remove();
+  const links = new Set<string>();
+  $("a[href]").each((_, el) => {
+    const href = ($(el).attr("href") ?? "").trim();
+    if (/^mailto:/i.test(href)) links.add(href.replace(/^mailto:/i, "").split("?")[0]!.toLowerCase());
+    else {
+      try {
+        const u = new URL(href, pageUrl);
+        // Yalnızca dış siteler (listedeki firmaların siteleri); listenin kendi sayfaları değil
+        if ((u.protocol === "http:" || u.protocol === "https:") && registrableHost(u.hostname) !== registrableHost(pageUrl.hostname)) links.add(`${u.protocol}//${u.hostname}`);
+      } catch {
+        /* geçersiz bağlantı */
+      }
+    }
+  });
+  $("tr").each((_, tr) => {
+    const cells = $(tr)
+      .children("td, th")
+      .map((__, c) => $(c).text().replace(/\s+/g, " ").trim())
+      .get()
+      .filter(Boolean);
+    $(tr).replaceWith(`\n${cells.join(" | ")}\n`);
+  });
+  $("br").replaceWith("\n");
+  $("p, div, li, h1, h2, h3, h4, h5, h6, dt, dd, section, article").append("\n");
+  const text = $("body")
+    .text()
+    .split("\n")
+    .map((l) => l.replace(/[ \t ]+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n");
+  const linkBlock = links.size ? `\n\nSAYFADAKİ BAĞLANTILAR:\n${[...links].slice(0, 400).join("\n")}` : "";
+  return (text + linkBlock).slice(0, MAX_LIST_TEXT);
+}

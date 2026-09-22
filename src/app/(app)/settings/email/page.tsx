@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { requireTenantPage } from "@/server/tenancy/context";
+import { requireTenantPage, requireUserPage } from "@/server/tenancy/context";
 import { can } from "@/server/tenancy/permissions";
 import { env } from "@/server/env";
 import { emailProviderLabel, isEmailConfigured } from "@/server/providers/email";
@@ -7,7 +7,7 @@ import { getSenderSettings } from "@/server/services/email-settings";
 import { listSuppressions } from "@/server/services/compliance";
 import { removeSuppressionAction } from "@/app/actions/email";
 import { Alert, Badge, Button, Card, CardBody, CardHeader, EmptyState } from "@/components/ui";
-import { DomainCheckButton, SenderForm, SuppressionAddForm } from "./email-forms";
+import { DomainCheckButton, SenderForm, SuppressionAddForm, TestEmailForm } from "./email-forms";
 
 export const metadata: Metadata = { title: "E-posta ve uyum" };
 
@@ -24,6 +24,7 @@ const DNS_LABEL = { pass: "Var", fail: "Hatalı", missing: "Yok", unknown: "Kont
 
 export default async function EmailSettingsPage() {
   const ctx = await requireTenantPage();
+  const user = await requireUserPage();
   const canManage = can(ctx, "email.settings");
   const canSuppress = can(ctx, "suppression.manage");
   const [{ settings, dns, checkedAt }, suppressions] = await Promise.all([getSenderSettings(ctx.companyId), listSuppressions(ctx)]);
@@ -66,6 +67,22 @@ export default async function EmailSettingsPage() {
               )}
               {canManage && <DomainCheckButton />}
             </>
+          )}
+          {canManage && (
+            <div className="border-t border-border pt-4">
+              <p className="mb-1 text-sm font-medium text-text">Test e-postası</p>
+              <p className="mb-3 text-xs leading-relaxed text-text-3">
+                Gerçek kampanyadan önce kendinize örnek bir ileti gönderin: SMTP ayarları çalışıyor mu, ileti spam&apos;e düşüyor mu, alt bilgi doğru mu?
+                Müşteri iletisi sayılmaz, kredi harcamaz. Gmail ve Outlook adreslerine birer tane göndermeniz önerilir.
+              </p>
+              {!isEmailConfigured() ? (
+                <p className="text-xs text-text-3">Önce sunucuda e-posta sağlayıcısını tanımlayın.</p>
+              ) : !settings ? (
+                <p className="text-xs text-text-3">Önce yukarıdaki gönderici kimliğini kaydedin.</p>
+              ) : (
+                <TestEmailForm defaultTo={user.email} />
+              )}
+            </div>
           )}
         </CardBody>
       </Card>

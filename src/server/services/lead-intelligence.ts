@@ -16,18 +16,20 @@ import {
 import { LEAD_SCORE_INSTRUCTIONS, LEAD_SCORE_SHAPE, leadScoreSchema } from "@/server/ai/prompts/lead-score";
 import { isLeadSourceConfigured } from "@/server/providers/lead-source";
 import { csvToRawLeads } from "@/server/providers/lead-source/csv";
-import type { LeadSearchQuery } from "@/server/providers/lead-source/types";
-import { crawlSite, FetchBlockedError } from "@/server/web/fetch-site";
+import type { LeadSearchQuery, LeadSourceKind, RawLead } from "@/server/providers/lead-source/types";
+import { crawlSite, FetchBlockedError, fetchListPage } from "@/server/web/fetch-site";
+import { normalizeUrl } from "@/server/web/ssrf";
+import { LIST_IMPORT_INSTRUCTIONS, LIST_IMPORT_SHAPE, listImportSchema, type ListImportOutput } from "@/server/ai/prompts/list-import";
 import { crawlToPrompt, allowPrivateFetch } from "@/server/jobs/handlers/website-analyze";
 import { enqueue } from "@/server/jobs/queue";
 import { consumeCredits, CREDIT_COSTS, refundCredits } from "@/server/usage/credits";
 import { audit } from "@/server/audit/audit";
 import { buildVerifiedCompanyContext } from "./facts";
-import { evidenceFound, valueFound } from "./evidence";
+import { evidenceFound, normalizeForMatch, valueFound } from "./evidence";
 import { saveDiscoveredLeads } from "./leads";
 import { AppError } from "@/lib/errors";
 import { computeReachability, finalizeScore } from "@/lib/lead-scoring";
-import { extractDomain, isGenericEmail, normalizeEmail, normalizePhone, pickCompanyEmail } from "@/lib/lead-normalize";
+import { extractDomain, isCompanyEmail, isGenericEmail, normalizeEmail, normalizePhone, pickCompanyEmail } from "@/lib/lead-normalize";
 
 const REFRESH_DAYS = 90;
 
@@ -69,6 +71,7 @@ async function sellerContext(companyId: string) {
 export interface ParsedSearch {
   query: LeadSearchQuery;
   interpretation: string;
+  source: LeadSourceKind;
 }
 
 /** AI kapalıyken arama ifadesi olduğu gibi kullanılır (zarif düşüş). */
@@ -76,6 +79,7 @@ export function fallbackSearch(prompt: string, limit: number): ParsedSearch {
   return {
     query: { keywords: [prompt.trim().slice(0, 80)], country: "Türkiye", cities: [], districts: [], industries: [], limit },
     interpretation: "AI kapalı olduğu için arama ifadesi olduğu gibi kullanıldı.",
+    source: "maps",
   };
 }
 
@@ -100,6 +104,7 @@ async function parseSearchPrompt(ctx: TenantContext, prompt: string, maxLimit: n
       limit: Math.min(data.requestedLimit ?? maxLimit, maxLimit),
     },
     interpretation: data.interpretation,
+    source: data.source,
   };
 }
 
@@ -107,7 +112,7 @@ async function parseSearchPrompt(ctx: TenantContext, prompt: string, maxLimit: n
  * Lead aramasını başlatır. Kredi, bulunabilecek en fazla lead sayısı kadar önden ayrılır;
  * iş bitince yalnızca YENİ eklenen lead'ler ücretlendirilir, kalan iade edilir.
  */
-export async function startLeadSearch(ctx: TenantContext, prompt: string, requestedLimit?: number) {
+export async function startLeadSearch(ctx: TenantContext, prompt: string, requestedLimit?: number, sourcePref: LeadSourceKind | "auto" = "auto") {
   assertCan(ctx, "lead.write");
   const text = prompt.trim();
   if (text.length < 3) throw new AppError("VALIDATION", "Ne tür firmalar aradığınızı yazın.", { prompt: "En az 3 karakter" });
@@ -127,6 +132,8 @@ export async function startLeadSearch(ctx: TenantContext, prompt: string, reques
   const max = Math.min(requestedLimit ?? env().LEAD_SEARCH_MAX, env().LEAD_SEARCH_MAX);
   const parsed = await parseSearchPrompt(ctx, text, max);
   const reserved = parsed.query.limit;
+  // Kullanıcı kaynak seçtiyse o; "Otomatik"te AI'ın seçimi
+  const source: LeadSourceKind = sourcePref === "auto" ? parsed.source : sourcePref;
 
   const { usageId } = await consumeCredits({
     companyId: ctx.companyId,
@@ -140,7 +147,7 @@ export async function startLeadSearch(ctx: TenantContext, prompt: string, reques
   try {
     jobId = await enqueue(
       "lead.search",
-      { prompt: text.slice(0, 1000), interpretation: parsed.interpretation, query: parsed.query, usageId, reserved },
+      { prompt: text.slice(0, 1000), interpretation: parsed.interpretation, query: parsed.query, usageId, reserved, source },
       { companyId: ctx.companyId, createdById: ctx.userId, maxAttempts: 3 },
     );
   } catch (err) {
@@ -154,9 +161,9 @@ export async function startLeadSearch(ctx: TenantContext, prompt: string, reques
     action: "lead.search.started",
     entityType: "Job",
     entityId: jobId,
-    metadata: { prompt: text.slice(0, 300), query: parsed.query as unknown as Prisma.InputJsonValue, reserved },
+    metadata: { prompt: text.slice(0, 300), query: parsed.query as unknown as Prisma.InputJsonValue, reserved, source },
   });
-  return { jobId, interpretation: parsed.interpretation, reserved };
+  return { jobId, interpretation: parsed.interpretation, reserved, source };
 }
 
 export async function listRecentSearches(ctx: TenantContext, take = 8) {
@@ -168,7 +175,7 @@ export async function listRecentSearches(ctx: TenantContext, take = 8) {
     select: { id: true, status: true, progress: true, error: true, payload: true, result: true, createdAt: true, finishedAt: true },
   });
   return jobs.map((j) => {
-    const p = j.payload as { prompt?: string; interpretation?: string; reserved?: number };
+    const p = j.payload as { prompt?: string; interpretation?: string; reserved?: number; source?: LeadSourceKind };
     const r = (j.result ?? {}) as { created?: number; merged?: number; found?: number };
     return {
       id: j.id,
@@ -177,6 +184,7 @@ export async function listRecentSearches(ctx: TenantContext, take = 8) {
       error: j.error,
       prompt: p.prompt ?? "",
       interpretation: p.interpretation ?? "",
+      source: p.source ?? "maps",
       created: r.created ?? null,
       merged: r.merged ?? null,
       found: r.found ?? null,
@@ -706,4 +714,161 @@ export async function getLastEmailDiscovery(ctx: TenantContext) {
     failed: r.failed ?? 0,
     items,
   };
+}
+
+// ── 6) Liste sayfasından içe aktarma (OSB / fuar / dernek listeleri) ────
+
+const LIST_CHUNK_CHARS = 25_000;
+const LIST_MAX_CHUNKS = 2;
+
+/**
+ * Liste sayfası adresi VEYA yapıştırılmış metinden firma içe aktarmayı başlatır.
+ * AI yalnızca metni yapılandırır; her firma ve her bilgi kaynak metinde doğrulanır (uydurma kaydedilmez).
+ */
+export async function startListImport(ctx: TenantContext, input: { url?: string | null; text?: string | null }) {
+  assertCan(ctx, "lead.write");
+  if (!isAIConfigured()) throw new AppError("AI_UNAVAILABLE", "Listeden içe aktarma için AI gerekli (sunucuda AI yapılandırılmamış).");
+  const url = input.url?.trim() || null;
+  const text = input.text?.trim() || null;
+  if (!url && !text) throw new AppError("VALIDATION", "Liste sayfasının adresini girin veya listeyi metin olarak yapıştırın.", { url: "Adres veya metin gerekli" });
+  if (url && text) throw new AppError("VALIDATION", "Adres veya metinden yalnızca birini kullanın.");
+  if (text && text.length < 40) throw new AppError("VALIDATION", "Yapıştırılan metin çok kısa.", { text: "En az birkaç firma satırı" });
+  if (url) {
+    try {
+      normalizeUrl(url);
+    } catch (err) {
+      throw new AppError("VALIDATION", (err as Error).message, { url: "Geçersiz adres" });
+    }
+  }
+  const db = tenantDb(ctx);
+  const running = await db.job.findFirst({ where: { type: "lead.list_import", status: { in: ["QUEUED", "RUNNING"] } }, select: { id: true } });
+  if (running) throw new AppError("CONFLICT", "Bir liste zaten işleniyor. Bitince yenisini başlatabilirsiniz.");
+
+  const { usageId } = await consumeCredits({ companyId: ctx.companyId, operation: "lead.list_import", userId: ctx.userId, refType: "lead.list_import" });
+  let jobId: string;
+  try {
+    jobId = await enqueue(
+      "lead.list_import",
+      { url, text: text?.slice(0, LIST_CHUNK_CHARS * LIST_MAX_CHUNKS) ?? null, usageId },
+      { companyId: ctx.companyId, createdById: ctx.userId, maxAttempts: 2 },
+    );
+  } catch (err) {
+    await refundCredits(usageId, "lead.list_import.enqueue_failed");
+    throw err;
+  }
+  await audit({ companyId: ctx.companyId, userId: ctx.userId, action: "lead.list_import.started", metadata: { url, pasted: Boolean(text) } });
+  return { jobId };
+}
+
+/** Metni satır sınırlarından parçalara böler (AI çıktı sınırı için) */
+function chunkLines(text: string, size: number, max: number): string[] {
+  const out: string[] = [];
+  let cur = "";
+  for (const line of text.split("\n")) {
+    if (cur.length + line.length + 1 > size && cur) {
+      out.push(cur);
+      if (out.length === max) return out;
+      cur = "";
+    }
+    cur += `${line}\n`;
+  }
+  if (cur.trim() && out.length < max) out.push(cur);
+  return out;
+}
+
+/** Telefonun son 10 hanesi metinde (ayraçlarla da olsa) geçiyor mu */
+function phoneFound(phone: string, text: string): boolean {
+  const d = phone.replace(/\D/g, "").slice(-10);
+  if (d.length < 10) return false;
+  return new RegExp(d.split("").join("[\\s().\\-/]*")).test(text);
+}
+
+/**
+ * AI çıktısını kaynak metne karşı doğrular. Saf fonksiyon — testlerde doğrudan kullanılır.
+ * Metinde geçmeyen firma atılır; metinde geçmeyen alanlar boşaltılır; kişisel e-posta alınmaz.
+ */
+export function verifyListCompanies(items: ListImportOutput["companies"], text: string, sourceUrl: string | null) {
+  const normText = normalizeForMatch(text);
+  const lowerText = text.toLowerCase();
+  const seen = new Set<string>();
+  const leads: RawLead[] = [];
+  let dropped = 0;
+  for (const c of items) {
+    const key = normalizeForMatch(c.name);
+    if (!valueFound(c.name, text) || key.length < 2 || seen.has(key)) {
+      dropped++;
+      continue;
+    }
+    seen.add(key);
+    const domain = c.website ? extractDomain(c.website) : null;
+    const website = domain && normText.includes(normalizeForMatch(domain)) ? domain : null;
+    const email = c.email ? normalizeEmail(c.email) : null;
+    const genericEmail = email && lowerText.includes(email) && isCompanyEmail(email, website) ? email : null;
+    const keep = (v: string | null) => (v && valueFound(v, text) ? v : null);
+    leads.push({
+      companyName: c.name.trim(),
+      website: website ?? undefined,
+      phone: c.phone && phoneFound(c.phone, text) ? c.phone : undefined,
+      genericEmail: genericEmail ?? undefined,
+      city: keep(c.city) ?? undefined,
+      district: keep(c.district) ?? undefined,
+      category: keep(c.sector) ?? undefined,
+      sourceType: "DIRECTORY",
+      sourceUrl: sourceUrl ?? undefined,
+    });
+  }
+  return { leads, dropped };
+}
+
+/** İş içinden çağrılır */
+export async function importFromList(companyId: string, payload: { url?: string | null; text?: string | null }, progress?: (pct: number) => Promise<void>) {
+  let text = payload.text ?? "";
+  let sourceUrl: string | null = null;
+  if (payload.url) {
+    const page = await fetchListPage(payload.url, { allowPrivateHosts: allowPrivateFetch() });
+    text = page.text;
+    sourceUrl = page.finalUrl;
+  }
+  if (text.replace(/\s+/g, "").length < 40) {
+    throw new AppError("VALIDATION", "Sayfada okunabilir liste bulunamadı (içerik JavaScript ile yükleniyor olabilir). Listeyi kopyalayıp metin olarak yapıştırın.");
+  }
+  await progress?.(20);
+
+  const chunks = chunkLines(text, LIST_CHUNK_CHARS, LIST_MAX_CHUNKS);
+  const extracted: ListImportOutput["companies"] = [];
+  for (const [i, chunk] of chunks.entries()) {
+    const { data } = await ai({ companyId, operation: "lead.list_import" }).extract({
+      schema: listImportSchema,
+      instructions: LIST_IMPORT_INSTRUCTIONS,
+      shape: LIST_IMPORT_SHAPE,
+      input: untrusted("company-list", chunk, LIST_CHUNK_CHARS + 1000),
+      maxTokens: 12_000,
+    });
+    extracted.push(...data.companies);
+    await progress?.(20 + Math.round(((i + 1) / chunks.length) * 60));
+  }
+
+  const { leads, dropped } = verifyListCompanies(extracted, text, sourceUrl);
+  const saved = leads.length ? await saveDiscoveredLeads(companyId, leads, { provider: "directory" }) : { created: 0, merged: 0 };
+  return {
+    sourceUrl,
+    truncated: text.length > LIST_CHUNK_CHARS * LIST_MAX_CHUNKS,
+    extracted: extracted.length,
+    dropped,
+    created: saved.created,
+    merged: saved.merged,
+  };
+}
+
+/** Son 24 saatteki listeden içe aktarma (ilerleme / özet için) */
+export async function getLastListImport(ctx: TenantContext) {
+  const job = await tenantDb(ctx).job.findFirst({
+    where: { type: "lead.list_import", createdAt: { gte: new Date(Date.now() - 86_400_000) } },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, status: true, payload: true, result: true, error: true, finishedAt: true },
+  });
+  if (!job) return null;
+  const p = job.payload as { url?: string | null };
+  const r = (job.result ?? {}) as { extracted?: number; dropped?: number; created?: number; merged?: number; truncated?: boolean };
+  return { id: job.id, status: job.status, error: job.error, finishedAt: job.finishedAt, url: p.url ?? null, ...r };
 }

@@ -1,11 +1,15 @@
 import "server-only";
+import { randomUUID } from "node:crypto";
 import type { Message } from "@prisma/client";
 import { tenantDb } from "@/server/tenancy/tenant-db";
+import { assertCan } from "@/server/tenancy/permissions";
+import type { TenantContext } from "@/server/tenancy/types";
 import { env } from "@/server/env";
 import { getEmailProvider } from "@/server/providers/email";
 import type { OutgoingEmail } from "@/server/providers/email/types";
 import { audit } from "@/server/audit/audit";
 import { AppError } from "@/lib/errors";
+import { normalizeEmail } from "@/lib/lead-normalize";
 import { findSuppression, refreshLeadCompliance } from "./compliance";
 import { getSenderSettings, type SenderSettings } from "./email-settings";
 import { oneClickUnsubscribeUrl, unsubscribeUrl } from "./unsubscribe";
@@ -254,4 +258,49 @@ export async function sendSingleApprovedMessage(companyId: string, messageId: st
 export async function pauseAfterSendFailure(companyId: string, campaignId: string, error: string) {
   await tenantDb({ companyId }).campaign.updateMany({ where: { id: campaignId, status: "RUNNING" }, data: { status: "PAUSED" } });
   await audit({ companyId, actorType: "SYSTEM", action: "campaign.send_failed", entityType: "Campaign", entityId: campaignId, metadata: { error: error.slice(0, 500) } });
+}
+
+// ── Test e-postası ────────────────────────────────────────────────────
+
+const TEST_EMAILS_PER_HOUR = 5;
+
+/**
+ * Yöneticinin kendi adresine örnek ileti: SMTP ayarları, spam klasörü ve alt bilgi kontrolü için.
+ * Gerçek gönderimle aynı yol (sağlayıcı + gönderici kimliği + alt bilgi) kullanılır; müşteri iletisi
+ * olarak kaydedilmez, günlük kotaya sayılmaz, kredi harcamaz. Kötüye kullanıma karşı saatte 5 ile sınırlı.
+ */
+export async function sendTestEmail(ctx: TenantContext, toInput: string) {
+  assertCan(ctx, "email.settings");
+  const to = normalizeEmail(toInput);
+  if (!to) throw new AppError("VALIDATION", "Geçerli bir e-posta adresi girin.", { to: "Geçersiz adres" });
+  const provider = getEmailProvider();
+  if (!provider) throw new AppError("VALIDATION", "Sunucuda e-posta sağlayıcısı tanımlı değil (Coolify → EMAIL_PROVIDER ve SMTP_* değişkenleri, ardından Redeploy).");
+  const { settings } = await getSenderSettings(ctx.companyId);
+  if (!settings) throw new AppError("VALIDATION", "Önce yukarıdaki gönderici kimliğini kaydedin.");
+
+  const recent = await tenantDb(ctx).auditLog.count({ where: { action: "email.test_sent", createdAt: { gte: new Date(Date.now() - 3600_000) } } });
+  if (recent >= TEST_EMAILS_PER_HOUR) throw new AppError("RATE_LIMITED", `Saatte en fazla ${TEST_EMAILS_PER_HOUR} test e-postası gönderilebilir. Biraz sonra tekrar deneyin.`);
+
+  const exampleUnsubscribe = `${env().APP_URL.replace(/\/$/, "")}/u/ornek-baglanti`;
+  const body = [
+    "Merhaba,",
+    "Bu, AI Sales OS'tan gönderilen bir test iletisidir. Bu iletiyi okuyorsanız e-posta ayarlarınız çalışıyor.",
+    "Kontrol edin: ileti gelen kutusuna mı yoksa spam klasörüne mi düştü? Gönderen adı ve adresi doğru mu? Alttaki gönderici kimliği ve ret bağlantısı görünüyor mu?",
+    "Not: Alttaki ret bağlantısı bu test iletisinde örnektir; gerçek kampanya iletilerinde alıcıya özel, çalışan bir bağlantı eklenir.",
+  ].join("\n\n");
+  const content = buildEmailContent(body, settings, exampleUnsubscribe);
+  const messageId = `test-${randomUUID()}`;
+  const res = await provider.send({
+    from: { email: settings.fromEmail, name: settings.fromName },
+    to,
+    replyTo: settings.replyTo ?? undefined,
+    subject: `Test e-postası — ${settings.fromName}`,
+    text: content.text,
+    html: content.html,
+    unsubscribeUrl: exampleUnsubscribe,
+    messageId,
+  });
+  await audit({ companyId: ctx.companyId, userId: ctx.userId, action: "email.test_sent", metadata: { provider: provider.name, accepted: res.accepted } });
+  if (!res.accepted) throw new AppError("EXTERNAL_FETCH", "Sağlayıcı iletiyi kabul etmedi. Gönderen adresin SMTP hesabına tanımlı olduğunu kontrol edin.");
+  return { to, provider: provider.name };
 }

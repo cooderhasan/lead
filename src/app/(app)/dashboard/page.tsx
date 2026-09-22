@@ -79,6 +79,9 @@ const ACTION_LABELS: Record<string, string> = {
   "opportunity.stage_changed": "Fırsat aşaması değişti",
   "task.completed": "Görev tamamlandı",
   "call.logged": "Telefon görüşmesi kaydedildi",
+  "email.test_sent": "Test e-postası gönderildi",
+  "lead.list_import.started": "Listeden içe aktarma başlatıldı",
+  "lead.list_import.completed": "Listeden firmalar içe aktarıldı",
   "lead.email_discovery.started": "Web sitelerinde e-posta araması başlatıldı",
   "lead.email_discovery.completed": "E-posta araması tamamlandı",
 };

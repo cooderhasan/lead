@@ -1,6 +1,6 @@
 "use client";
 
-import { addSuppressionAction, checkDomainAction, saveSenderAction } from "@/app/actions/email";
+import { addSuppressionAction, checkDomainAction, saveSenderAction, sendTestEmailAction } from "@/app/actions/email";
 import { ActionForm, FormMessage, SubmitButton } from "@/components/forms";
 import { Field, Input, Select, Textarea } from "@/components/ui";
 
@@ -44,6 +44,26 @@ export function SenderForm({ values, disabled }: { values: SenderFormValues; dis
             </Field>
           </fieldset>
           {!disabled && <SubmitButton pendingText="Kaydediliyor…" className="self-start">Kaydet</SubmitButton>}
+        </>
+      )}
+    </ActionForm>
+  );
+}
+
+export function TestEmailForm({ defaultTo }: { defaultTo: string }) {
+  return (
+    <ActionForm action={sendTestEmailAction} className="gap-3">
+      {(state) => (
+        <>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <Field label="Test e-postasının gideceği adres" htmlFor="test-to" className="flex-1" error={state.fieldErrors?.to}>
+              <Input id="test-to" name="to" type="email" required defaultValue={defaultTo} />
+            </Field>
+            <SubmitButton variant="secondary" pendingText="Gönderiliyor…" className="self-start sm:self-end">
+              Test e-postası gönder
+            </SubmitButton>
+          </div>
+          <FormMessage state={state} />
         </>
       )}
     </ActionForm>

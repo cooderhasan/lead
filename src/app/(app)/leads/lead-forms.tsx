@@ -4,6 +4,7 @@ import {
   createLeadAction,
   findEmailsAction,
   importLeadsCsvAction,
+  importListAction,
   quickDeleteLeadAction,
   quickSetEmailAction,
   researchLeadAction,
@@ -44,10 +45,44 @@ export function LeadSearchForm({ enabled, maxLimit }: { enabled: boolean; maxLim
             <Field label="Adet" htmlFor="limit" className="w-28">
               <Input id="limit" name="limit" type="number" min={1} max={maxLimit} defaultValue={Math.min(20, maxLimit)} disabled={!enabled} />
             </Field>
+            <Field label="Kaynak" htmlFor="source" className="w-56">
+              <Select id="source" name="source" defaultValue="auto" disabled={!enabled}>
+                <option value="auto">Otomatik (AI seçer)</option>
+                <option value="maps">Google Haritalar</option>
+                <option value="web">Web araması</option>
+              </Select>
+            </Field>
             <SubmitButton pendingText="Anlaşılıyor…" className="self-end">
               <Search className="size-4" aria-hidden /> Lead bul
             </SubmitButton>
           </div>
+        </>
+      )}
+    </ActionForm>
+  );
+}
+
+export function ListImportForm({ enabled }: { enabled: boolean }) {
+  return (
+    <ActionForm action={importListAction} resetOnSuccess>
+      {(state) => (
+        <>
+          <FormMessage state={state} />
+          <Field
+            label="Liste sayfasının adresi"
+            htmlFor="list-url"
+            hint="OSB üye listesi, fuar katılımcıları, dernek üyeleri… AI sayfadaki firmaları çıkarır; sayfada yazmayan bilgi kaydedilmez. 3 kredi (firma çıkmazsa iade)."
+            error={state.fieldErrors?.url}
+          >
+            <Input id="list-url" name="url" type="url" inputMode="url" placeholder="https://www.osb.org.tr/firmalar" disabled={!enabled} />
+          </Field>
+          <details>
+            <summary className="cursor-pointer text-xs font-medium text-accent-text">Sayfa açılmıyorsa veya liste PDF&apos;teyse: metni yapıştır</summary>
+            <Textarea name="text" rows={5} maxLength={50_000} className="mt-2 text-xs" placeholder="Listeyi kopyalayıp buraya yapıştırın (adres alanını boş bırakın)" disabled={!enabled} />
+          </details>
+          <SubmitButton variant="secondary" pendingText="Başlatılıyor…" className="self-start" >
+            <Upload className="size-4" aria-hidden /> Listeyi içe aktar
+          </SubmitButton>
         </>
       )}
     </ActionForm>

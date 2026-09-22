@@ -8,6 +8,8 @@ export const CREDIT_COSTS = {
   "website.analyze": 2,
   "lead.enrich": 2,
   "lead.score": 1,
+  /** Liste sayfasından firma çıkarma (AI) — sayfa / metin parçası başına */
+  "lead.list_import": 3,
   "ai.deep_research": 3,
   "ai.message": 1,
   "document.analyze": 5,
@@ -21,6 +23,7 @@ export const OPERATION_LABELS: Record<string, string> = {
   "website.analyze": "Web sitesi analizi",
   "lead.enrich": "Lead zenginleştirme",
   "lead.score": "Lead puanlama",
+  "lead.list_import": "Listeden içe aktarma",
   "ai.deep_research": "AI derin araştırma",
   "ai.message": "AI mesaj",
   "document.analyze": "Doküman analizi",

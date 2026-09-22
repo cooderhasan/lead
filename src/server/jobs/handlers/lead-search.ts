@@ -13,7 +13,7 @@ const MAX_POLLS = 60;
 
 export const searchLeadsJob: JobHandler<"lead.search"> = async (payload, h) => {
   if (!h.companyId) throw new PermanentJobError("Şirket bağlamı yok.");
-  const provider = getLeadSourceProvider();
+  const provider = getLeadSourceProvider(payload.source ?? "maps");
 
   // Tekrar denemede yeni (ücretli) çalıştırma başlatma — kayıtlı runId'den devam et
   let runId = payload.runId;

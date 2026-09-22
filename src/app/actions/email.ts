@@ -6,6 +6,7 @@ import { requireTenant } from "@/server/tenancy/context";
 import { parseForm, safeAction } from "@/server/actions/safe-action";
 import { runSenderDomainCheck, saveSenderSettings } from "@/server/services/email-settings";
 import { addSuppressionByUser, removeSuppression, reviewComplianceRecord } from "@/server/services/compliance";
+import { sendTestEmail } from "@/server/services/campaign-send";
 import { senderSettingsSchema } from "@/lib/validation";
 import { AppError } from "@/lib/errors";
 import type { ActionState } from "@/lib/action-state";
@@ -30,6 +31,14 @@ export async function checkDomainAction(_: ActionState): Promise<ActionState> {
     return dns.spf === "pass" && dns.dmarc === "pass"
       ? { ok: true, message: "SPF ve DMARC kayıtları bulundu." }
       : { ok: false, error: dns.notes.slice(0, 2).join(" ") };
+  });
+}
+
+export async function sendTestEmailAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  return safeAction(async () => {
+    const ctx = await requireTenant();
+    const res = await sendTestEmail(ctx, String(fd.get("to") ?? ""));
+    return { ok: true, message: `Test e-postası ${res.to} adresine gönderildi. Gelen kutusunu ve spam klasörünü kontrol edin (birkaç dakika sürebilir).` };
   });
 }
 

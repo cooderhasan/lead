@@ -5,16 +5,16 @@ import type { LeadStatus } from "@prisma/client";
 import { requireTenantPage } from "@/server/tenancy/context";
 import { can } from "@/server/tenancy/permissions";
 import { env } from "@/server/env";
-import { isLeadSourceConfigured } from "@/server/providers/lead-source";
+import { isLeadSourceConfigured, LEAD_SOURCE_LABELS } from "@/server/providers/lead-source";
 import { isAIConfigured } from "@/server/ai";
 import { LEAD_STATUS_LABELS, leadStats, listLeads } from "@/server/services/leads";
-import { getLastEmailDiscovery, listRecentSearches } from "@/server/services/lead-intelligence";
+import { getLastEmailDiscovery, getLastListImport, listRecentSearches } from "@/server/services/lead-intelligence";
 import { JobPoller } from "@/components/job-poller";
 import { Alert, Badge, Card, CardBody, CardHeader, EmptyState, Input, LinkButton, PageHeader, Select, StatCard, buttonClass } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { LEAD_STATUSES } from "@/lib/validation";
 import { scoreTone } from "@/lib/lead-scoring";
-import { CsvImportForm, FindEmailsButton, LeadSearchForm, QuickDeleteButton, QuickEmailForm, ScoreLeadsButton } from "./lead-forms";
+import { CsvImportForm, FindEmailsButton, LeadSearchForm, ListImportForm, QuickDeleteButton, QuickEmailForm, ScoreLeadsButton } from "./lead-forms";
 
 export const metadata: Metadata = { title: "Potansiyel müşteriler" };
 
@@ -22,6 +22,8 @@ const PAGE_SIZE = 50;
 
 const SOURCE_LABELS: Record<string, string> = {
   apify: "Google Haritalar",
+  "apify-web": "Web araması",
+  directory: "Liste sayfası",
   csv: "CSV",
   manual: "Elle",
 };
@@ -37,12 +39,14 @@ export default async function LeadsPage({
   const minScore = sp.min ? Math.max(0, Math.min(100, Number(sp.min) || 0)) : undefined;
   const page = Math.max(1, Number(sp.page) || 1);
 
-  const [{ rows, total }, stats, searches, emailRun] = await Promise.all([
+  const [{ rows, total }, stats, searches, emailRun, listRun] = await Promise.all([
     listLeads(ctx, { q: sp.q, status, minScore, take: PAGE_SIZE, skip: (page - 1) * PAGE_SIZE }),
     leadStats(ctx),
     listRecentSearches(ctx, 5),
     getLastEmailDiscovery(ctx),
+    getLastListImport(ctx),
   ]);
+  const listRunning = listRun && (listRun.status === "QUEUED" || listRun.status === "RUNNING");
   const emailRunning = emailRun && (emailRun.status === "QUEUED" || emailRun.status === "RUNNING");
   const canWrite = can(ctx, "lead.write");
   const sourceReady = isLeadSourceConfigured();
@@ -110,6 +114,7 @@ export default async function LeadsPage({
                     .map((s) => (
                       <li key={s.id} className="flex flex-wrap items-center gap-2 px-3 py-2">
                         <span className="min-w-0 flex-1 truncate text-text-2" title={s.interpretation}>{s.prompt}</span>
+                        <span className="shrink-0 text-text-3">{LEAD_SOURCE_LABELS[s.source]}</span>
                         {s.status === "SUCCEEDED" ? (
                           <Badge tone="success">{s.created ?? 0} yeni · {s.merged ?? 0} birleşti</Badge>
                         ) : s.status === "FAILED" ? (
@@ -124,9 +129,24 @@ export default async function LeadsPage({
             </CardBody>
           </Card>
           <Card>
-            <CardHeader title="CSV ile içe aktar" description="Elinizdeki firma listesini yükleyin; tekrar eden firmalar otomatik birleştirilir." />
-            <CardBody>
-              <CsvImportForm />
+            <CardHeader title="Listeden içe aktar" description="Hazır firma listelerini ekleyin; tekrar eden firmalar otomatik birleştirilir." />
+            <CardBody className="flex flex-col gap-4">
+              {listRunning ? (
+                <JobPoller
+                  jobId={listRun.id}
+                  label="Liste okunuyor ve firmalar çıkarılıyor…"
+                  steps={[[0, "Sayfa okunuyor…"], [20, "AI firmaları çıkarıyor (1-2 dakika)…"], [80, "Doğrulanıp kaydediliyor…"]]}
+                />
+              ) : (
+                <>
+                  {listRun && <ListImportSummary run={listRun} />}
+                  <ListImportForm enabled={aiReady} />
+                </>
+              )}
+              <div className="border-t border-border pt-4">
+                <p className="mb-3 text-sm font-medium text-text">CSV dosyası</p>
+                <CsvImportForm />
+              </div>
             </CardBody>
           </Card>
         </div>
@@ -343,3 +363,23 @@ const OUTCOME_META: Record<(typeof OUTCOME_ORDER)[number], { label: string; tone
   notFound: { label: "Kurumsal adres yok", tone: "neutral" },
   failed: { label: "Site açılmıyor", tone: "warning" },
 };
+
+function ListImportSummary({ run }: { run: NonNullable<Awaited<ReturnType<typeof getLastListImport>>> }) {
+  if (run.status !== "SUCCEEDED") {
+    return <Alert tone="danger">Son liste içe aktarılamadı{run.error ? `: ${run.error}` : "."} Kredi iade edildi.</Alert>;
+  }
+  const added = (run.created ?? 0) + (run.merged ?? 0);
+  return (
+    <Alert tone={added > 0 ? "success" : "neutral"}>
+      <p className="font-medium">
+        Son liste: {run.created ?? 0} yeni firma eklendi{run.merged ? `, ${run.merged} mevcut kayıtla birleşti` : ""}.
+      </p>
+      <p className="mt-0.5 text-xs opacity-80">
+        {run.extracted ?? 0} firma okundu
+        {run.dropped ? ` · ${run.dropped} tanesi kaynakta doğrulanamadığı için alınmadı` : ""}
+        {run.truncated ? " · liste uzundu, ilk kısmı işlendi (kalanı için sonraki sayfanın adresini girin)" : ""}
+        {added === 0 ? " · firma çıkmadığı için kredi iade edildi" : ""}
+      </p>
+    </Alert>
+  );
+}

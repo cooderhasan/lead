@@ -7,6 +7,9 @@ import type { LeadSourceType } from "@prisma/client";
  * Kural: Sağlayıcılar yalnızca kamuya açık / kullanım şartlarına uygun veri döndürür.
  * Kişisel iletişim bilgisi `personalContacts` alanında AYRI döner; şirket genel iletişiminden karıştırılmaz.
  */
+/** Otomatik arama kaynağı: işletme dizini (Google Haritalar) veya web araması (Google sonuçları) */
+export type LeadSourceKind = "maps" | "web";
+
 export interface LeadSearchQuery {
   /** Doğal dilden türetilmiş arama ifadesi, ör. "otomotiv yan sanayi" */
   keywords: string[];

@@ -6,6 +6,8 @@ export interface JobPayloads {
   /** Doğal dil lead araması. `runId` ilk denemede yazılır; tekrar denemede yeni (ücretli) çalıştırma başlatılmaz. */
   "lead.search": {
     prompt: string;
+    /** Eski işlerde yok → "maps" */
+    source?: import("@/server/providers/lead-source/types").LeadSourceKind;
     interpretation: string;
     query: LeadSearchQuery;
     usageId?: string;
@@ -18,6 +20,8 @@ export interface JobPayloads {
   "lead.score": { leadIds: string[]; usageId?: string };
   /** Web sitesinden kurumsal e-posta bulma (AI'sız, kredi düşmez) */
   "lead.find_email": { leadIds: string[] };
+  /** Liste sayfası / yapıştırılmış metinden firma çıkarma (AI + kaynak metinde doğrulama) */
+  "lead.list_import": { url: string | null; text: string | null; usageId?: string };
   /** Kampanya stratejisi (AI) — sonuç PENDING, insan onayı bekler */
   "campaign.strategy": { campaignId: string; usageId?: string };
   /** Kampanya ilk temas mesajları (AI) — her mesaj PENDING_APPROVAL */

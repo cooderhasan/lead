@@ -81,6 +81,29 @@ export class BrevoProvider implements EmailProvider {
   }
 }
 
+/** nodemailer hatasını yöneticinin düzeltebileceği Türkçe açıklamaya çevirir (şifre / sunucu adı yazılmaz) */
+export function describeSmtpError(err: unknown, opts: { port: number; secure: boolean }): string {
+  const e = err as { code?: string; responseCode?: number; message?: string };
+  const raw = (e.message ?? "").slice(0, 200);
+  switch (e.code) {
+    case "EAUTH":
+      return "SMTP girişi reddedildi: kullanıcı adı veya şifre hatalı. Bazı servisler (Gmail, Zoho, Yandex) normal şifre yerine 'uygulama şifresi' ister.";
+    case "ECONNECTION":
+    case "ETIMEDOUT":
+    case "EDNS":
+      return "SMTP sunucusuna bağlanılamadı. SMTP_HOST ve SMTP_PORT değerlerini kontrol edin; sunucunuz bu porttan dışarı çıkışı engelliyor olabilir.";
+    case "ESOCKET":
+    case "ETLS":
+      return opts.secure
+        ? `SSL bağlantısı kurulamadı. ${opts.port} portu için SMTP_SECURE=false deneyin (465 → true, 587 → false).`
+        : `Güvenli bağlantı kurulamadı. ${opts.port} portu için SMTP_SECURE=true deneyin (465 → true, 587 → false).`;
+    case "EENVELOPE":
+      return `Sunucu gönderen veya alıcı adresini reddetti. Gönderen adres, SMTP hesabıyla aynı (ya da o hesaba tanımlı) olmalı. (${raw})`;
+  }
+  if (e.responseCode && e.responseCode >= 500) return `SMTP sunucusu iletiyi reddetti (${e.responseCode}): ${raw}`;
+  return `SMTP gönderimi başarısız: ${raw}`;
+}
+
 export class SmtpProvider implements EmailProvider {
   readonly name = "smtp";
   constructor(
@@ -112,7 +135,7 @@ export class SmtpProvider implements EmailProvider {
       return { providerMessageId: info.messageId ?? email.messageId, accepted: info.accepted.length > 0 };
     } catch (err) {
       const code = (err as { responseCode?: number }).responseCode;
-      const e = new AppError("EXTERNAL_FETCH", `SMTP gönderimi başarısız: ${(err as Error).message.slice(0, 300)}`);
+      const e = new AppError("EXTERNAL_FETCH", describeSmtpError(err, this.opts));
       // 5xx SMTP yanıtı kalıcı (adres yok, reddedildi); diğerleri geçici
       (e as AppError & { retryable?: boolean }).retryable = !(code && code >= 500);
       throw e;

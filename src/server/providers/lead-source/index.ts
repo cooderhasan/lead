@@ -1,7 +1,8 @@
 import "server-only";
 import { env } from "@/server/env";
 import { ApifyLeadSourceProvider } from "./apify";
-import type { LeadSourceProvider } from "./types";
+import { ApifyWebSearchProvider } from "./apify-web";
+import type { LeadSourceKind, LeadSourceProvider } from "./types";
 
 let override: LeadSourceProvider | null = null;
 
@@ -14,9 +15,13 @@ export function isLeadSourceConfigured(): boolean {
   return Boolean(override) || Boolean(env().APIFY_TOKEN);
 }
 
-/** Otomatik lead arama sağlayıcısı. Yapılandırılmamışsa anlaşılır Türkçe hata fırlatır. */
-export function getLeadSourceProvider(): LeadSourceProvider {
+/** Otomatik lead arama sağlayıcısı (Google Haritalar veya web araması). Yapılandırılmamışsa anlaşılır Türkçe hata fırlatır. */
+export function getLeadSourceProvider(kind: LeadSourceKind = "maps"): LeadSourceProvider {
   if (override) return override;
   const e = env();
-  return new ApifyLeadSourceProvider(e.APIFY_TOKEN ?? "", e.APIFY_GOOGLE_MAPS_ACTOR);
+  return kind === "web"
+    ? new ApifyWebSearchProvider(e.APIFY_TOKEN ?? "", e.APIFY_WEB_SEARCH_ACTOR)
+    : new ApifyLeadSourceProvider(e.APIFY_TOKEN ?? "", e.APIFY_GOOGLE_MAPS_ACTOR);
 }
+
+export const LEAD_SOURCE_LABELS: Record<LeadSourceKind, string> = { maps: "Google Haritalar", web: "Web araması" };

@@ -170,6 +170,7 @@ export const factEditSchema = z.object({
 export const leadSearchFormSchema = z.object({
   prompt: z.string().trim().min(3, "Ne tür firmalar aradığınızı yazın").max(1000),
   limit: z.preprocess((v) => (v === "" || v == null ? undefined : Number(v)), z.number().int().min(1).max(500).optional()),
+  source: z.enum(["auto", "maps", "web"]).default("auto"),
 });
 
 export const manualLeadSchema = z.object({
