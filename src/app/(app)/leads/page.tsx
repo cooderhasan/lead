@@ -202,6 +202,14 @@ export default async function LeadsPage({
                         <ContactIcon on={Boolean(l.website)} label={l.domain ?? "Web sitesi yok"}><Globe /></ContactIcon>
                         {l.domain && <span className="truncate text-xs">{l.domain}</span>}
                       </div>
+                      {canWrite && !l.genericEmail && (
+                        <details className="mt-1.5">
+                          <summary className="cursor-pointer text-xs font-medium text-accent-text">+ e-posta ekle</summary>
+                          <div className="mt-2">
+                            <QuickEmailForm leadId={l.id} />
+                          </div>
+                        </details>
+                      )}
                     </td>
                     <td className="px-3 py-3 text-center">
                       {l.fitScore === null ? <span className="text-xs text-text-3">—</span> : <ScorePill score={l.fitScore} />}
