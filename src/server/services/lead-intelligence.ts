@@ -979,3 +979,169 @@ export function mapStructuredRecords(records: Array<Record<string, unknown>>, so
   }
   return { leads, dropped };
 }
+
+// ── 7) "Hazırla": e-posta bul → araştır → puanla (tek zincir) ──────────
+
+/** Bir "Hazırla" çalıştırmasında en fazla lead (AI maliyeti ve süre) */
+export const PREPARE_MAX = 50;
+
+export interface PrepareSteps {
+  email: boolean;
+  research: boolean;
+  score: boolean;
+}
+
+export interface PreparePlanItem {
+  leadId: string;
+  /** Web sitesinden kurumsal e-posta (AI'sız, ücretsiz) — araştırılacak lead'de araştırma zaten bulur */
+  email: boolean;
+  /** AI araştırma + puanlama (lead.enrich, 2 kredi) */
+  research: boolean;
+  /** Yalnızca puanlama (lead.score, 1 kredi) */
+  score: boolean;
+}
+
+/** Seçilen lead'ler için adım planı ve kredi tahmini (kredi düşmez) */
+export async function planPreparation(ctx: TenantContext, leadIds: string[], steps: PrepareSteps) {
+  assertCan(ctx, "lead.read");
+  const leads = await tenantDb(ctx).lead.findMany({
+    where: { id: { in: [...new Set(leadIds)] } },
+    select: { id: true, website: true, genericEmail: true, lastVerifiedAt: true },
+    take: PREPARE_MAX,
+  });
+  const plan: PreparePlanItem[] = leads.map((l) => {
+    const hasSite = Boolean(l.website);
+    const research = steps.research && hasSite;
+    return {
+      leadId: l.id,
+      research,
+      email: steps.email && hasSite && !l.genericEmail && !research,
+      score: !research && steps.score,
+    };
+  });
+  const research = plan.filter((p) => p.research).length;
+  const scoreOnly = plan.filter((p) => p.score).length;
+  const emailOnly = plan.filter((p) => p.email).length;
+  const credits = research * CREDIT_COSTS["lead.enrich"] + scoreOnly * CREDIT_COSTS["lead.score"];
+  return { plan: plan.filter((p) => p.research || p.score || p.email), research, scoreOnly, emailOnly, credits, capped: leadIds.length > PREPARE_MAX };
+}
+
+/** "Hazırla"yı başlatır: kredi önden ayrılır, iş sırayla yürür, yapılamayan adımın kredisi iade edilir */
+export async function startPreparation(ctx: TenantContext, leadIds: string[], steps: PrepareSteps) {
+  assertCan(ctx, "lead.write");
+  if (!steps.email && !steps.research && !steps.score) throw new AppError("VALIDATION", "En az bir adım seçin.");
+  if ((steps.research || steps.score) && !isAIConfigured()) throw new AppError("AI_UNAVAILABLE", "Araştırma ve puanlama için AI gerekli (sunucuda AI yapılandırılmamış).");
+  const db = tenantDb(ctx);
+  const running = await db.job.findFirst({ where: { type: "lead.prepare", status: { in: ["QUEUED", "RUNNING"] } }, select: { id: true } });
+  if (running) throw new AppError("CONFLICT", "Bir hazırlık zaten sürüyor. Bitince yenisini başlatabilirsiniz.");
+
+  const p = await planPreparation(ctx, leadIds, steps);
+  if (p.plan.length === 0) throw new AppError("VALIDATION", "Seçilen firmalarda yapılacak adım yok (web sitesi yok veya e-postası zaten var).");
+
+  let enrichUsageId: string | undefined;
+  let scoreUsageId: string | undefined;
+  try {
+    if (p.research) enrichUsageId = (await consumeCredits({ companyId: ctx.companyId, operation: "lead.enrich", quantity: p.research, userId: ctx.userId, refType: "lead.prepare" })).usageId;
+    if (p.scoreOnly) scoreUsageId = (await consumeCredits({ companyId: ctx.companyId, operation: "lead.score", quantity: p.scoreOnly, userId: ctx.userId, refType: "lead.prepare" })).usageId;
+  } catch (err) {
+    // İkinci düşüm başarısızsa (yetersiz kredi) ilki geri verilir
+    if (enrichUsageId) await refundCredits(enrichUsageId, "lead.prepare.insufficient");
+    throw err;
+  }
+  let jobId: string;
+  try {
+    jobId = await enqueue("lead.prepare", { plan: p.plan, enrichUsageId, scoreUsageId }, { companyId: ctx.companyId, createdById: ctx.userId, maxAttempts: 1 });
+  } catch (err) {
+    if (enrichUsageId) await refundCredits(enrichUsageId, "lead.prepare.enqueue_failed");
+    if (scoreUsageId) await refundCredits(scoreUsageId, "lead.prepare.enqueue_failed");
+    throw err;
+  }
+  await audit({ companyId: ctx.companyId, userId: ctx.userId, action: "lead.prepare.started", metadata: { count: p.plan.length, credits: p.credits } });
+  return { jobId, ...p };
+}
+
+/**
+ * İş içinden çağrılır. Her lead için sırayla: araştır+puanla (site açılmazsa yalnızca puanla) / yalnızca puanla / e-posta bul.
+ * Kullanılmayan kredi iade edilir. Bir lead'in hatası diğerlerini durdurmaz.
+ */
+export async function runPreparation(
+  companyId: string,
+  payload: { plan: PreparePlanItem[]; enrichUsageId?: string; scoreUsageId?: string },
+  progress?: (pct: number) => Promise<void>,
+) {
+  const db = tenantDb({ companyId });
+  const seller = await sellerContext(companyId);
+  let researched = 0;
+  let scored = 0;
+  let emailsFound = 0;
+  let failed = 0;
+  let enrichRefund = 0;
+  let scoreRefund = 0;
+  for (const [i, item] of payload.plan.entries()) {
+    const exists = await db.lead.findUnique({ where: { id: item.leadId }, select: { id: true, website: true, genericEmail: true } });
+    if (!exists) {
+      // Bu arada silinmiş
+      if (item.research) enrichRefund += CREDIT_COSTS["lead.enrich"];
+      if (item.score) scoreRefund += CREDIT_COSTS["lead.score"];
+      continue;
+    }
+    if (item.research) {
+      let researchOk = false;
+      try {
+        await researchLead(companyId, item.leadId);
+        researchOk = true;
+        researched++;
+      } catch {
+        /* site açılmadı / okunamadı → mevcut veriyle puanlanır */
+      }
+      try {
+        await scoreLead(companyId, item.leadId, seller);
+        scored++;
+        // Araştırma yapılamadıysa yalnızca puanlama ücreti kalır
+        if (!researchOk) enrichRefund += CREDIT_COSTS["lead.enrich"] - CREDIT_COSTS["lead.score"];
+      } catch {
+        failed++;
+        enrichRefund += researchOk ? CREDIT_COSTS["lead.score"] : CREDIT_COSTS["lead.enrich"];
+      }
+    } else if (item.score) {
+      try {
+        await scoreLead(companyId, item.leadId, seller);
+        scored++;
+      } catch {
+        failed++;
+        scoreRefund += CREDIT_COSTS["lead.score"];
+      }
+    }
+    if (item.email && exists.website && !exists.genericEmail) {
+      const res = await findLeadEmails(companyId, [item.leadId]).catch(() => null);
+      if (res?.found) emailsFound++;
+    }
+    await progress?.(Math.round(((i + 1) / payload.plan.length) * 95));
+  }
+  if (payload.enrichUsageId && enrichRefund > 0) await refundCredits(payload.enrichUsageId, "lead.prepare.partial", enrichRefund);
+  if (payload.scoreUsageId && scoreRefund > 0) await refundCredits(payload.scoreUsageId, "lead.prepare.partial", scoreRefund);
+
+  // Araştırma sırasında bulunan e-postalar da sayılır
+  const withEmail = await db.lead.count({ where: { id: { in: payload.plan.map((p) => p.leadId) }, genericEmail: { not: null } } });
+  const top = await db.lead.findMany({
+    where: { id: { in: payload.plan.map((p) => p.leadId) }, fitScore: { not: null } },
+    orderBy: { fitScore: "desc" },
+    take: 5,
+    select: { id: true, companyName: true, fitScore: true },
+  });
+  const high = await db.lead.count({ where: { id: { in: payload.plan.map((p) => p.leadId) }, fitScore: { gte: 70 } } });
+  return { total: payload.plan.length, researched, scored, emailsFound, withEmail, high, failed, refunded: enrichRefund + scoreRefund, top };
+}
+
+/** Son 24 saatteki hazırlık (ilerleme / özet) */
+export async function getLastPreparation(ctx: TenantContext) {
+  const job = await tenantDb(ctx).job.findFirst({
+    where: { type: "lead.prepare", createdAt: { gte: new Date(Date.now() - 86_400_000) } },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, status: true, result: true, error: true, finishedAt: true, payload: true },
+  });
+  if (!job) return null;
+  const r = (job.result ?? {}) as Partial<Awaited<ReturnType<typeof runPreparation>>>;
+  const total = ((job.payload as { plan?: unknown[] } | null)?.plan ?? []).length;
+  return { id: job.id, status: job.status, error: job.error, finishedAt: job.finishedAt, total, ...r };
+}

@@ -5,6 +5,7 @@ import { searchLeadsJob, onLeadSearchFailure } from "./lead-search";
 import { enrichLeadJob, onLeadEnrichFailure } from "./lead-enrich";
 import { scoreLeadsJob, onLeadScoreFailure } from "./lead-score";
 import { findEmailsJob } from "./lead-find-email";
+import { prepareLeadsJob, onPrepareFailure } from "./lead-prepare";
 import { listImportJob, onListImportFailure } from "./lead-list-import";
 import {
   campaignMessagesJob,
@@ -38,6 +39,7 @@ export const handlers: Registry = {
   "lead.enrich": { run: enrichLeadJob, onFailure: onLeadEnrichFailure },
   "lead.score": { run: scoreLeadsJob, onFailure: onLeadScoreFailure },
   "lead.find_email": { run: findEmailsJob },
+  "lead.prepare": { run: prepareLeadsJob, onFailure: onPrepareFailure },
   "lead.list_import": { run: listImportJob, onFailure: onListImportFailure },
   "campaign.strategy": { run: campaignStrategyJob, onFailure: onCampaignStrategyFailure },
   "campaign.generate_messages": { run: campaignMessagesJob, onFailure: onCampaignMessagesFailure },

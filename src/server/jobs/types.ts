@@ -21,6 +21,12 @@ export interface JobPayloads {
   /** Web sitesinden kurumsal e-posta bulma (AI'sız, kredi düşmez) */
   "lead.find_email": { leadIds: string[] };
   /** Liste sayfası / yapıştırılmış metinden firma çıkarma (AI + kaynak metinde doğrulama) */
+  /** "Hazırla": seçilen lead'ler için e-posta bul → araştır → puanla (sırayla) */
+  "lead.prepare": {
+    plan: Array<{ leadId: string; email: boolean; research: boolean; score: boolean }>;
+    enrichUsageId?: string;
+    scoreUsageId?: string;
+  };
   "lead.list_import": { url: string | null; text: string | null; usageId?: string; filter?: string[] };
   /** Kampanya stratejisi (AI) — sonuç PENDING, insan onayı bekler */
   "campaign.strategy": { campaignId: string; usageId?: string };

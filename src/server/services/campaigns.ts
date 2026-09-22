@@ -651,3 +651,49 @@ export async function getLastCampaignJob(ctx: TenantContext, campaignId: string)
     select: { type: true, status: true, error: true, result: true, finishedAt: true },
   });
 }
+
+// ── Seçilen lead'leri kampanyaya ekleme (toplu işlem) ─────────────────
+
+/** Lead eklenebilen kampanya aşamaları (gönderim bitmemiş / arşivlenmemiş) */
+export const CAMPAIGN_OPEN_STATUSES: CampaignStatus[] = ["DRAFT", "STRATEGY_REVIEW", "READY", "PAUSED", "RUNNING"];
+
+export async function listOpenCampaigns(ctx: TenantContext) {
+  assertCan(ctx, "campaign.read");
+  return tenantDb(ctx).campaign.findMany({
+    where: { status: { in: CAMPAIGN_OPEN_STATUSES } },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+    select: { id: true, name: true, status: true },
+  });
+}
+
+/**
+ * Seçilen lead'leri mevcut kampanyaya ekler. Engellenen / kazanılan / kaybedilen ve zaten ekli olanlar atlanır;
+ * her lead için gönderim uygunluğu hemen değerlendirilir. Mesajları "Mesajları üret" ile ayrıca üretilir.
+ */
+export async function addLeadsToCampaign(ctx: TenantContext, campaignId: string, leadIds: string[]) {
+  assertCan(ctx, "campaign.write");
+  const db = tenantDb(ctx);
+  const campaign = await db.campaign.findUnique({ where: { id: campaignId }, select: { id: true, status: true, name: true } });
+  if (!campaign) throw new AppError("NOT_FOUND", "Kampanya bulunamadı.");
+  if (!CAMPAIGN_OPEN_STATUSES.includes(campaign.status)) throw new AppError("CONFLICT", "Bu kampanyaya artık lead eklenemez.");
+
+  const already = new Set((await db.campaignLead.findMany({ where: { campaignId }, select: { leadId: true } })).map((c) => c.leadId));
+  const leads = await db.lead.findMany({
+    where: { id: { in: [...new Set(leadIds)] }, suppressed: false, status: { notIn: [...EXCLUDED_LEAD_STATUSES] } },
+    select: { id: true, fitScore: true },
+  });
+  let added = 0;
+  let noEmail = 0;
+  for (const l of leads) {
+    if (already.has(l.id)) continue;
+    const { best } = await refreshLeadCompliance(ctx.companyId, l.id);
+    const complianceStatus = best?.status ?? "DO_NOT_SEND";
+    if (!best) noEmail++;
+    await db.campaignLead.create({ data: { companyId: ctx.companyId, campaignId, leadId: l.id, score: l.fitScore, complianceStatus } });
+    added++;
+  }
+  const skipped = leadIds.length - added;
+  await audit({ companyId: ctx.companyId, userId: ctx.userId, action: "campaign.leads_added", entityType: "Campaign", entityId: campaignId, metadata: { added, skipped } });
+  return { added, skipped, noEmail, campaignName: campaign.name };
+}

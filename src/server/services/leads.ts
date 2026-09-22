@@ -41,12 +41,28 @@ export interface LeadFilter {
   minScore?: number;
   /** Yalnızca puanlanmamış lead'ler */
   unscored?: boolean;
+  /** Kaynak: Google Haritalar, web araması, liste sayfası, CSV, elle */
+  source?: LeadSourceFilter;
+  /** Kurumsal e-postası olan / olmayan */
+  email?: "yes" | "no";
   take?: number;
   skip?: number;
 }
 
-function buildWhere(filter: LeadFilter): Prisma.LeadWhereInput {
+export const LEAD_SOURCE_FILTERS = {
+  maps: { label: "Google Haritalar", providers: ["apify"] },
+  web: { label: "Web araması", providers: ["apify-web"] },
+  directory: { label: "Liste sayfası", providers: ["directory"] },
+  csv: { label: "CSV", providers: ["csv"] },
+  manual: { label: "Elle", providers: ["manual"] },
+} as const;
+export type LeadSourceFilter = keyof typeof LEAD_SOURCE_FILTERS;
+
+export function buildWhere(filter: LeadFilter): Prisma.LeadWhereInput {
   const where: Prisma.LeadWhereInput = {};
+  if (filter.source) where.sources = { some: { provider: { in: [...LEAD_SOURCE_FILTERS[filter.source].providers] } } };
+  if (filter.email === "yes") where.genericEmail = { not: null };
+  if (filter.email === "no") where.genericEmail = null;
   if (filter.status) where.status = filter.status;
   if (filter.city) where.city = { equals: filter.city, mode: "insensitive" };
   if (typeof filter.minScore === "number") where.fitScore = { gte: filter.minScore };
@@ -82,6 +98,41 @@ export async function listLeads(ctx: TenantContext, filter: LeadFilter = {}) {
     db.lead.count({ where }),
   ]);
   return { rows, total };
+}
+
+/** Toplu işlemde en fazla seçilebilen lead */
+export const BULK_MAX = 500;
+
+/**
+ * Toplu işlem seçimini lead id listesine çevirir: ya işaretlenen id'ler ya da "filtreye uyan tümü".
+ * Her durumda yalnızca bu şirketin lead'leri döner (istemciden gelen id'ye güvenilmez).
+ */
+export async function resolveLeadSelection(ctx: TenantContext, sel: { ids?: string[]; filter?: LeadFilter }, max = BULK_MAX) {
+  assertCan(ctx, "lead.read");
+  const where = sel.filter ? buildWhere(sel.filter) : { id: { in: [...new Set(sel.ids ?? [])].slice(0, max) } };
+  const rows = await tenantDb(ctx).lead.findMany({
+    where,
+    orderBy: [{ fitScore: { sort: "desc", nulls: "last" } }, { discoveredAt: "desc" }],
+    take: max,
+    select: { id: true },
+  });
+  return rows.map((r) => r.id);
+}
+
+/** Toplu durum değişikliği */
+export async function bulkUpdateLeadStatus(ctx: TenantContext, ids: string[], status: LeadStatus) {
+  assertCan(ctx, "lead.write");
+  const res = await tenantDb(ctx).lead.updateMany({ where: { id: { in: ids } }, data: { status, suppressed: status === "SUPPRESSED" } });
+  await audit({ companyId: ctx.companyId, userId: ctx.userId, action: "lead.bulk_status", metadata: { status, count: res.count } });
+  return res.count;
+}
+
+/** Toplu silme */
+export async function bulkDeleteLeads(ctx: TenantContext, ids: string[]) {
+  assertCan(ctx, "lead.write");
+  const res = await tenantDb(ctx).lead.deleteMany({ where: { id: { in: ids } } });
+  await audit({ companyId: ctx.companyId, userId: ctx.userId, action: "lead.bulk_deleted", metadata: { count: res.count } });
+  return res.count;
 }
 
 export async function leadStats(ctx: TenantContext) {

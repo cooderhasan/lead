@@ -1,14 +1,16 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Building2, Globe, Mail, Phone, Plus, Send, Star, Target } from "lucide-react";
-import type { LeadStatus } from "@prisma/client";
 import { requireTenantPage } from "@/server/tenancy/context";
 import { can } from "@/server/tenancy/permissions";
 import { env } from "@/server/env";
 import { isLeadSourceConfigured, LEAD_SOURCE_LABELS } from "@/server/providers/lead-source";
 import { isAIConfigured } from "@/server/ai";
-import { LEAD_STATUS_LABELS, leadStats, listLeads } from "@/server/services/leads";
-import { getLastEmailDiscovery, getLastListImport, listRecentSearches } from "@/server/services/lead-intelligence";
+import { LEAD_SOURCE_FILTERS, LEAD_STATUS_LABELS, leadStats, listLeads } from "@/server/services/leads";
+import { getLastEmailDiscovery, getLastListImport, getLastPreparation, listRecentSearches } from "@/server/services/lead-intelligence";
+import { listOpenCampaigns } from "@/server/services/campaigns";
+import { parseLeadFilter } from "@/lib/lead-filter";
+import { BulkBar, SelectPageCheckbox } from "./bulk-bar";
 import { JobPoller } from "@/components/job-poller";
 import { Alert, Badge, Card, CardBody, CardHeader, EmptyState, Input, LinkButton, PageHeader, Select, StatCard, buttonClass } from "@/components/ui";
 import { cn } from "@/lib/cn";
@@ -31,21 +33,32 @@ const SOURCE_LABELS: Record<string, string> = {
 export default async function LeadsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; status?: string; min?: string; page?: string }>;
+  searchParams: Promise<{ q?: string; status?: string; min?: string; page?: string; source?: string; email?: string }>;
 }) {
   const ctx = await requireTenantPage();
   const sp = await searchParams;
-  const status = (LEAD_STATUSES as readonly string[]).includes(sp.status ?? "") ? (sp.status as LeadStatus) : undefined;
-  const minScore = sp.min ? Math.max(0, Math.min(100, Number(sp.min) || 0)) : undefined;
+  const filter = parseLeadFilter((k) => sp[k as keyof typeof sp]);
+  const { status, minScore } = filter;
   const page = Math.max(1, Number(sp.page) || 1);
 
-  const [{ rows, total }, stats, searches, emailRun, listRun] = await Promise.all([
-    listLeads(ctx, { q: sp.q, status, minScore, take: PAGE_SIZE, skip: (page - 1) * PAGE_SIZE }),
+  const canWriteEarly = can(ctx, "lead.write");
+  const [{ rows, total }, stats, searches, emailRun, listRun, prepRun, openCampaigns] = await Promise.all([
+    listLeads(ctx, { ...filter, take: PAGE_SIZE, skip: (page - 1) * PAGE_SIZE }),
     leadStats(ctx),
     listRecentSearches(ctx, 5),
     getLastEmailDiscovery(ctx),
     getLastListImport(ctx),
+    getLastPreparation(ctx),
+    canWriteEarly && can(ctx, "campaign.write") ? listOpenCampaigns(ctx) : Promise.resolve([]),
   ]);
+  const prepRunning = prepRun && (prepRun.status === "QUEUED" || prepRun.status === "RUNNING");
+  const filterParams: Record<string, string | undefined> = {
+    q: filter.q,
+    status: filter.status,
+    min: filter.minScore !== undefined ? String(filter.minScore) : undefined,
+    source: filter.source,
+    email: filter.email,
+  };
   const listRunning = listRun && (listRun.status === "QUEUED" || listRun.status === "RUNNING");
   const emailRunning = emailRun && (emailRun.status === "QUEUED" || emailRun.status === "RUNNING");
   const canWrite = can(ctx, "lead.write");
@@ -60,6 +73,8 @@ export default async function LeadsPage({
     if (sp.q) u.set("q", sp.q);
     if (status) u.set("status", status);
     if (minScore !== undefined) u.set("min", String(minScore));
+    if (filter.source) u.set("source", filter.source);
+    if (filter.email) u.set("email", filter.email);
     u.set("page", String(p));
     return `/leads?${u.toString()}`;
   };
@@ -166,8 +181,40 @@ export default async function LeadsPage({
             <option value="70">70+</option>
             <option value="45">45+</option>
           </Select>
+          <Select name="source" defaultValue={filter.source ?? ""} className="w-40" aria-label="Kaynak">
+            <option value="">Tüm kaynaklar</option>
+            {Object.entries(LEAD_SOURCE_FILTERS).map(([k, v]) => (
+              <option key={k} value={k}>{v.label}</option>
+            ))}
+          </Select>
+          <Select name="email" defaultValue={filter.email ?? ""} className="w-40" aria-label="E-posta">
+            <option value="">E-posta: hepsi</option>
+            <option value="yes">E-postası olan</option>
+            <option value="no">E-postası olmayan</option>
+          </Select>
           <button type="submit" className={buttonClass("secondary")}>Filtrele</button>
         </form>
+        {canWrite && (
+          <BulkBar
+            matching={total}
+            filter={filterParams}
+            campaigns={openCampaigns}
+            statuses={LEAD_STATUSES.map((s) => [s, LEAD_STATUS_LABELS[s]] as [string, string])}
+          />
+        )}
+        {prepRun && (
+          <div className="border-b border-border px-5 py-3">
+            {prepRunning ? (
+              <JobPoller
+                jobId={prepRun.id}
+                label={`${prepRun.total} firma hazırlanıyor (e-posta → analiz → puan)…`}
+                steps={[[0, "Firmalar sırayla işleniyor (firma başına 10-30 saniye)…"]]}
+              />
+            ) : (
+              <PreparationSummary run={prepRun} />
+            )}
+          </div>
+        )}
         {/* Filtre formunun DIŞINDA olmalı: iç içe <form> geçersizdir, tarayıcı butonu dış formu (filtre) gönderir */}
         {emailRun && (
           <div className="border-b border-border px-5 py-3">
@@ -202,7 +249,8 @@ export default async function LeadsPage({
             <table className="w-full min-w-[640px] text-sm">
               <thead className="border-b border-border bg-surface-2/50 text-left text-[11px] font-semibold uppercase tracking-wider text-text-3">
                 <tr>
-                  <th className="px-5 py-2.5">Firma</th>
+                  {canWrite && <th className="w-10 py-2.5 pl-5"><SelectPageCheckbox /></th>}
+                  <th className={cn("py-2.5", canWrite ? "px-3" : "px-5")}>Firma</th>
                   <th className="px-3 py-2.5 text-center">Puan</th>
                   <th className="px-3 py-2.5">Konum</th>
                   <th className="hidden px-3 py-2.5 lg:table-cell">Sektör</th>
@@ -213,8 +261,21 @@ export default async function LeadsPage({
               </thead>
               <tbody className="divide-y divide-border">
                 {rows.map((l) => (
-                  <tr key={l.id} className="group transition-colors hover:bg-surface-2/60">
-                    <td className="max-w-80 px-5 py-3">
+                  <tr key={l.id} className="group transition-colors hover:bg-surface-2/60 has-[input[data-bulk]:checked]:bg-accent-soft/40">
+                    {canWrite && (
+                      <td className="w-10 py-3 pl-5 align-top">
+                        <input
+                          type="checkbox"
+                          name="leadId"
+                          value={l.id}
+                          form="bulk-form"
+                          data-bulk
+                          aria-label={`${l.companyName} seç`}
+                          className="mt-1 size-4 cursor-pointer accent-[var(--accent)]"
+                        />
+                      </td>
+                    )}
+                    <td className={cn("max-w-80 py-3", canWrite ? "px-3" : "px-5")}>
                       <Link href={`/leads/${l.id}`} className="line-clamp-2 font-medium text-text group-hover:text-accent-text">{l.companyName}</Link>
                       <div className="mt-1 flex items-center gap-2.5 text-text-3">
                         <ContactIcon on={Boolean(l.phone)} label={l.phone ?? "Telefon yok"}><Phone /></ContactIcon>
@@ -383,5 +444,35 @@ function ListImportSummary({ run }: { run: NonNullable<Awaited<ReturnType<typeof
         {added === 0 && !run.structured ? " · firma çıkmadığı için kredi iade edildi" : ""}
       </p>
     </Alert>
+  );
+}
+
+function PreparationSummary({ run }: { run: NonNullable<Awaited<ReturnType<typeof getLastPreparation>>> }) {
+  if (run.status !== "SUCCEEDED") {
+    return <Alert tone="danger">Son hazırlık tamamlanamadı{run.error ? `: ${run.error}` : "."} Ayrılan kredi iade edildi.</Alert>;
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-sm font-medium text-text">Son hazırlık: {run.total} firma</p>
+      <div className="flex flex-wrap gap-2">
+        <Badge tone="accent">{run.researched ?? 0} analiz edildi</Badge>
+        <Badge>{run.scored ?? 0} puanlandı</Badge>
+        <Badge tone="success">{run.high ?? 0} firma 70+ puan</Badge>
+        <Badge>{run.withEmail ?? 0} firmanın e-postası var</Badge>
+        {run.failed ? <Badge tone="warning">{run.failed} firmada hata</Badge> : null}
+        {run.refunded ? <span className="self-center text-xs text-text-3">{run.refunded} kredi iade edildi</span> : null}
+      </div>
+      {run.top && run.top.length > 0 && (
+        <p className="text-xs text-text-2">
+          En yüksek puanlılar:{" "}
+          {run.top.map((t, i) => (
+            <span key={t.id}>
+              {i > 0 && " · "}
+              <Link href={`/leads/${t.id}`} className="font-medium text-accent-text hover:underline">{t.companyName}</Link> ({t.fitScore})
+            </span>
+          ))}
+        </p>
+      )}
+    </div>
   );
 }

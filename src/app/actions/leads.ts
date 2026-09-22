@@ -4,11 +4,25 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireTenant } from "@/server/tenancy/context";
 import { parseForm, safeAction } from "@/server/actions/safe-action";
-import { createManualLead, deleteLead, updateLeadContactInfo, updateLeadStatus } from "@/server/services/leads";
+import {
+  bulkDeleteLeads,
+  bulkUpdateLeadStatus,
+  createManualLead,
+  deleteLead,
+  resolveLeadSelection,
+  updateLeadContactInfo,
+  updateLeadStatus,
+} from "@/server/services/leads";
+import { addLeadsToCampaign } from "@/server/services/campaigns";
+import { parseLeadFilter } from "@/lib/lead-filter";
+import { LEAD_STATUSES } from "@/lib/validation";
+import type { LeadStatus } from "@prisma/client";
 import {
   importLeadsCsv,
   startEmailDiscovery,
   startListImport,
+  planPreparation,
+  startPreparation,
   startLeadResearch,
   startLeadScoring,
   startLeadSearch,
@@ -156,4 +170,79 @@ export async function deleteLeadAction(fd: FormData) {
   await deleteLead(ctx, String(fd.get("id")));
   revalidatePath("/leads");
   redirect("/leads");
+}
+
+// ── Toplu işlemler ─────────────────────────────────────────────────────
+
+/** Seçim: işaretlenen satırlar ya da "filtreye uyan tümü" (filtre sunucuda yeniden uygulanır) */
+async function selectedIds(fd: FormData) {
+  const ctx = await requireTenant();
+  const all = fd.get("mode") === "all";
+  const ids = all
+    ? await resolveLeadSelection(ctx, { filter: parseLeadFilter((k) => fd.get(`f_${k}`)?.toString()) })
+    : await resolveLeadSelection(ctx, { ids: fd.getAll("leadId").filter((v): v is string => typeof v === "string" && v.length > 0) });
+  if (ids.length === 0) throw new AppError("VALIDATION", "Önce firma seçin.");
+  return { ctx, ids };
+}
+
+const prepareSteps = (fd: FormData) => ({ email: fd.get("p_email") === "on", research: fd.get("p_research") === "on", score: fd.get("p_score") === "on" });
+
+/** "Hazırla" için kredi tahmini (kredi düşmez) — onay penceresinde gösterilir */
+export async function estimatePrepareAction(fd: FormData): Promise<{ ok: boolean; error?: string; count?: number; credits?: number; research?: number; scoreOnly?: number; emailOnly?: number; capped?: boolean }> {
+  try {
+    const { ctx, ids } = await selectedIds(fd);
+    const p = await planPreparation(ctx, ids, prepareSteps(fd));
+    return { ok: true, count: p.plan.length, credits: p.credits, research: p.research, scoreOnly: p.scoreOnly, emailOnly: p.emailOnly, capped: p.capped };
+  } catch (err) {
+    return { ok: false, error: err instanceof AppError ? err.message : "Tahmin hesaplanamadı." };
+  }
+}
+
+export async function bulkLeadsAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  return safeAction(async () => {
+    const { ctx, ids } = await selectedIds(fd);
+    const op = String(fd.get("op") ?? "");
+    let message: string;
+    switch (op) {
+      case "prepare": {
+        const r = await startPreparation(ctx, ids, prepareSteps(fd));
+        message = `${r.plan.length} firma hazırlanıyor (${r.credits} kredi ayrıldı; yapılamayan adımın kredisi iade edilir). İlerleme listenin üstünde.`;
+        break;
+      }
+      case "find_email": {
+        const r = await startEmailDiscovery(ctx, ids);
+        message = `${r.count} firmanın sitesinde e-posta aranıyor.`;
+        break;
+      }
+      case "score": {
+        const r = await startLeadScoring(ctx, ids);
+        message = `${r.count} firma puanlanıyor (${r.cost} kredi).`;
+        break;
+      }
+      case "campaign": {
+        const campaignId = String(fd.get("campaignId") ?? "");
+        if (!campaignId) throw new AppError("VALIDATION", "Kampanya seçin.");
+        const r = await addLeadsToCampaign(ctx, campaignId, ids);
+        message = `"${r.campaignName}" kampanyasına ${r.added} firma eklendi${r.skipped ? `, ${r.skipped} atlandı (zaten ekli / engelli / kapanmış)` : ""}${r.noEmail ? ` · ${r.noEmail} firmanın e-postası yok, gönderilemez` : ""}. Kampanya sayfasında "Mesajları üret" ile devam edin.`;
+        revalidatePath(`/campaigns/${campaignId}`);
+        break;
+      }
+      case "status": {
+        const status = String(fd.get("status") ?? "");
+        if (!(LEAD_STATUSES as readonly string[]).includes(status)) throw new AppError("VALIDATION", "Durum seçin.");
+        const n = await bulkUpdateLeadStatus(ctx, ids, status as LeadStatus);
+        message = `${n} firmanın durumu güncellendi.`;
+        break;
+      }
+      case "delete": {
+        const n = await bulkDeleteLeads(ctx, ids);
+        message = `${n} firma silindi.`;
+        break;
+      }
+      default:
+        throw new AppError("VALIDATION", "İşlem seçin.");
+    }
+    revalidatePath("/leads");
+    return { ok: true, message };
+  });
 }
