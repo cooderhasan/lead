@@ -275,22 +275,60 @@ export interface CrawlResult {
   skipped: Array<{ url: string; reason: string }>;
 }
 
+/** https://firma.com → https://www.firma.com → http://firma.com (IP adreslerinde yalnızca kendisi) */
+function originCandidates(start: URL): URL[] {
+  const out = [start];
+  if (isIP(start.hostname)) return out;
+  const path = `${start.pathname}${start.search}`;
+  if (start.protocol === "https:") {
+    if (!start.hostname.startsWith("www.")) out.push(new URL(`https://www.${start.hostname}${path}`));
+    out.push(new URL(`http://${start.hostname}${path}`));
+  }
+  return out;
+}
+
+/** Ağ hatasını kullanıcıya anlaşılır Türkçe açıklamaya çevirir */
+export function describeNetworkError(err: unknown): string {
+  const e = err as { message?: string; cause?: unknown } | null;
+  // undici hata kodunu iç içe "cause" zincirinde taşır
+  let code = "";
+  for (let c: unknown = err, i = 0; c && i < 5 && !code; c = (c as { cause?: unknown }).cause, i++) {
+    code = String((c as { code?: string }).code ?? "");
+  }
+  if (code === "ENOTFOUND" || code === "EAI_AGAIN") return "Alan adı bulunamadı — site kapanmış veya adres yanlış olabilir.";
+  if (code.startsWith("ERR_TLS") || code.includes("SSL") || code.includes("CERT")) return "Sitenin güvenlik sertifikası (SSL) hatalı.";
+  if (code === "ECONNREFUSED" || code === "ECONNRESET" || code === "UND_ERR_SOCKET") return "Site bağlantıyı reddetti.";
+  if (code === "UND_ERR_CONNECT_TIMEOUT" || e?.message?.includes("timeout") || (err as Error)?.name === "TimeoutError") return "Site zamanında yanıt vermedi.";
+  return e?.message ? `Siteye ulaşılamadı (${e.message}).` : "Siteye ulaşılamadı.";
+}
+
 /**
  * Şirket sitesini tarar: ana sayfa + en fazla `maxPages - 1` öncelikli iç sayfa.
  * robots.txt'ye uyar; sayfalar arası kısa bekleme yapar.
  */
 export async function crawlSite(input: string, opts: FetchOptions & { maxPages?: number; ensureContactPage?: boolean } = {}): Promise<CrawlResult> {
   const maxPages = opts.maxPages ?? 6;
-  const start = normalizeUrl(input);
   const skipped: CrawlResult["skipped"] = [];
 
+  // Çoğu küçük firma sitesi yalnızca "www." ile veya yalnızca http ile açılır (DNS kaydı / SSL sertifikası eksik).
+  // Yanıt veren ilk adres kullanılır; robots.txt her zaman o adreste, sayfalardan ÖNCE okunur.
+  let start = normalizeUrl(input);
   let disallowed: RobotsRule[] = [];
-  try {
-    const robots = await safeFetch(new URL("/robots.txt", start), { ...opts, timeoutMs: 6_000 });
-    if (robots.status === 200) disallowed = parseRobots(robots.body, USER_AGENT);
-  } catch {
-    /* robots.txt yoksa devam */
+  let lastError: unknown = null;
+  let reachable = false;
+  for (const candidate of originCandidates(start)) {
+    try {
+      const robots = await safeFetch(new URL("/robots.txt", candidate), { ...opts, timeoutMs: 8_000 });
+      start = candidate;
+      reachable = true;
+      if (robots.status === 200) disallowed = parseRobots(robots.body, USER_AGENT);
+      break;
+    } catch (err) {
+      if (err instanceof FetchBlockedError) throw err;
+      lastError = err;
+    }
   }
+  if (!reachable) throw new Error(describeNetworkError(lastError));
   if (!isAllowedByRobots(start.pathname + start.search, disallowed)) {
     throw new FetchBlockedError("Sitenin robots.txt dosyası analize izin vermiyor.");
   }

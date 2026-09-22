@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { rawDb } from "@/server/db";
 import { drainInlineJobs } from "@/server/jobs/queue";
-import { saveDiscoveredLeads } from "@/server/services/leads";
+import { saveDiscoveredLeads, updateLeadContactInfo } from "@/server/services/leads";
 import { listCallQueue, logCall } from "@/server/services/calls";
 import { findLeadEmails, getLastEmailDiscovery, startEmailDiscovery } from "@/server/services/lead-intelligence";
 import { pickCompanyEmail } from "@/lib/lead-normalize";
@@ -35,6 +35,13 @@ describe("kurumsal e-posta seçimi", () => {
     // Ücretsiz serviste yalnızca firma adını taşıyan adres
     expect(pickCompanyEmail(["aktifyay@gmail.com"], "aktifyay.com.tr")).toBe("aktifyay@gmail.com");
     expect(pickCompanyEmail(["mehmet1980@gmail.com"], "aktifyay.com.tr")).toBeNull();
+    // Firma adıyla açılmış kutular kurumsaldır; kişi adı değildir (gerçek sitelerden örnekler)
+    expect(pickCompanyEmail(["trend@trendmakine.com"], "trendmakine.com")).toBe("trend@trendmakine.com");
+    expect(pickCompanyEmail(["otopehlivan@gmail.com"], "pehlivanoto.com")).toBe("otopehlivan@gmail.com");
+    expect(pickCompanyEmail(["murat@unlumakine.com"], "unlumakine.com")).toBeNull();
+    expect(pickCompanyEmail(["info@demsay.com"], "nefdem.com")).toBeNull();
+    // Genel kutu, firma adlı kutudan önce gelir
+    expect(pickCompanyEmail(["trend@trendmakine.com", "info@trendmakine.com"], "trendmakine.com")).toBe("info@trendmakine.com");
   });
 
   it("Cloudflare ile gizlenmiş adresi çözer", () => {
@@ -65,7 +72,7 @@ describe("kurumsal e-posta seçimi", () => {
       const res = await findLeadEmails(a.companyId, [withSite!, noSite!]);
       expect(site.hits).toContain("/iletisim");
       // Sitesiz lead atlanır (sayılmaz)
-      expect(res).toEqual({ found: 1, notFound: 0, failed: 0 });
+      expect(res).toEqual({ found: 1, notFound: 0, blocked: 0, failed: 0 });
       expect((await rawDb.lead.findUniqueOrThrow({ where: { id: withSite } })).genericEmail).toBe("satis@127.0.0.1");
       expect((await rawDb.company.findUniqueOrThrow({ where: { id: a.companyId } })).creditBalance).toBe(credits);
     } finally {
@@ -83,10 +90,25 @@ describe("kurumsal e-posta seçimi", () => {
     expect(res.count).toBe(1);
     await drainInlineJobs();
     // Özet: .invalid siteye ulaşılamaz → "ulaşılamadı" sayılır; B şirketi A'nın aramasını görmez
-    expect(await getLastEmailDiscovery(a)).toMatchObject({ status: "SUCCEEDED", total: 1, found: 0, notFound: 0, failed: 1 });
+    expect(await getLastEmailDiscovery(a)).toMatchObject({ status: "SUCCEEDED", total: 1, found: 0, notFound: 0, blocked: 0, failed: 1 });
     expect(await getLastEmailDiscovery(b)).toBeNull();
     const viewer = await createTenant("V", "VIEWER");
     await expect(startEmailDiscovery(viewer, [ok!])).rejects.toThrow();
+  });
+});
+
+describe("iletişim bilgisi düzenleme", () => {
+  it("kurumsal ve firma adlı adres kaydedilir; kişisel adres reddedilir; başka şirket / izleyici değiştiremez", async () => {
+    const a = await createTenant("A");
+    const b = await createTenant("B");
+    const [l] = await leads(a, [{ name: "Kırpart", website: "kirpart.com.tr" }]);
+    await updateLeadContactInfo(a, { id: l!, website: "kirpart.com.tr", phone: "0224 111 22 33", genericEmail: "Info@Kirpart.com.tr" });
+    expect(await rawDb.lead.findUniqueOrThrow({ where: { id: l } })).toMatchObject({ genericEmail: "info@kirpart.com.tr", normalizedPhone: "+902241112233", domain: "kirpart.com.tr" });
+    await updateLeadContactInfo(a, { id: l!, website: "kirpart.com.tr", genericEmail: "kirpart@gmail.com" });
+    await expect(updateLeadContactInfo(a, { id: l!, website: "kirpart.com.tr", genericEmail: "ahmet.yilmaz@kirpart.com.tr" })).rejects.toThrow(/kişiye ait/);
+    await expect(updateLeadContactInfo(b, { id: l!, genericEmail: "info@x.com" })).rejects.toThrow(/bulunamadı/);
+    const viewer = await createTenant("V", "VIEWER");
+    await expect(updateLeadContactInfo(viewer, { id: l!, genericEmail: "info@x.com" })).rejects.toThrow();
   });
 });
 

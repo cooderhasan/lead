@@ -186,6 +186,13 @@ export const manualLeadSchema = z.object({
   category: optText(200),
 });
 
+export const leadContactSchema = z.object({
+  id: z.string().min(1),
+  website: optText(500),
+  phone: optText(50),
+  genericEmail: optText(200),
+});
+
 export const LEAD_STATUSES = [
   "NEW", "RESEARCHING", "QUALIFIED", "CONTACT_READY", "CONTACTED", "REPLIED", "INTERESTED",
   "QUALIFIED_OPPORTUNITY", "QUOTE_REQUESTED", "PROPOSAL_SENT", "NEGOTIATION", "WON", "LOST", "NURTURE", "SUPPRESSED",

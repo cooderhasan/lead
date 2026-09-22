@@ -72,7 +72,7 @@ export function PageHeader({ title, description, actions }: { title: string; des
         <h1 className="text-2xl font-semibold tracking-tight text-text sm:text-[28px] sm:leading-9">{title}</h1>
         {description && <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-text-2">{description}</p>}
       </div>
-      {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+      {actions && <div className="flex shrink-0 flex-wrap gap-2">{actions}</div>}
     </div>
   );
 }

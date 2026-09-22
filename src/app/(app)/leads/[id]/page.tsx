@@ -24,7 +24,7 @@ import { getLeadCrm, STAGE_LABELS } from "@/server/services/crm";
 import { isWhatsAppActive } from "@/server/services/whatsapp";
 import { ActionButton } from "@/components/action-button";
 import { formatMoney } from "@/lib/cn";
-import { ComplianceReviewForm, ManualReplyForm, ResearchLeadButton, ScoreLeadsButton } from "../lead-forms";
+import { ComplianceReviewForm, LeadContactForm, ManualReplyForm, ResearchLeadButton, ScoreLeadsButton } from "../lead-forms";
 import { CALL_OUTCOME_LABELS, listLeadCalls } from "@/server/services/calls";
 import { CallResultForm } from "../../calls/call-forms";
 
@@ -385,6 +385,14 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                   </>
                 )}
               </dl>
+              {canWrite && (
+                <details className="mt-4 border-t border-border pt-3">
+                  <summary className="cursor-pointer text-sm font-medium text-accent-text">İletişim bilgilerini düzenle</summary>
+                  <div className="mt-3">
+                    <LeadContactForm lead={lead} />
+                  </div>
+                </details>
+              )}
             </CardBody>
           </Card>
 

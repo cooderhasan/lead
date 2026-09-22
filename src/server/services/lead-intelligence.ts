@@ -614,6 +614,7 @@ export async function findLeadEmails(companyId: string, leadIds: string[], progr
   const db = tenantDb({ companyId });
   let found = 0;
   let notFound = 0;
+  let blocked = 0;
   let failed = 0;
   for (const [i, leadId] of leadIds.entries()) {
     const lead = await db.lead.findUnique({ where: { id: leadId }, select: { id: true, website: true, genericEmail: true } });
@@ -626,12 +627,14 @@ export async function findLeadEmails(companyId: string, leadIds: string[], progr
         const res = await db.lead.updateMany({ where: { id: leadId, genericEmail: null }, data: { genericEmail: email } });
         if (res.count) found++;
       } else notFound++;
-    } catch {
-      failed++;
+    } catch (err) {
+      // robots.txt yasağı ayrı sayılır: site açık ama taranmamızı istemiyor (buna uyulur)
+      if (err instanceof FetchBlockedError) blocked++;
+      else failed++;
     }
     await progress?.(Math.round(((i + 1) / leadIds.length) * 100));
   }
-  return { found, notFound, failed };
+  return { found, notFound, blocked, failed };
 }
 
 /** Son 24 saatteki e-posta araması (liste üstünde özet / ilerleme için) */
@@ -643,7 +646,7 @@ export async function getLastEmailDiscovery(ctx: TenantContext) {
   });
   if (!job) return null;
   const total = ((job.payload as { leadIds?: string[] } | null)?.leadIds ?? []).length;
-  const r = (job.result ?? {}) as { found?: number; notFound?: number; failed?: number };
+  const r = (job.result ?? {}) as { found?: number; notFound?: number; blocked?: number; failed?: number };
   return {
     id: job.id,
     status: job.status,
@@ -652,6 +655,7 @@ export async function getLastEmailDiscovery(ctx: TenantContext) {
     total,
     found: r.found ?? 0,
     notFound: r.notFound ?? 0,
+    blocked: r.blocked ?? 0,
     failed: r.failed ?? 0,
   };
 }

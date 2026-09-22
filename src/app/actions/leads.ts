@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireTenant } from "@/server/tenancy/context";
 import { parseForm, safeAction } from "@/server/actions/safe-action";
-import { createManualLead, deleteLead, updateLeadStatus } from "@/server/services/leads";
+import { createManualLead, deleteLead, updateLeadContactInfo, updateLeadStatus } from "@/server/services/leads";
 import {
   importLeadsCsv,
   startEmailDiscovery,
@@ -12,7 +12,7 @@ import {
   startLeadScoring,
   startLeadSearch,
 } from "@/server/services/lead-intelligence";
-import { leadSearchFormSchema, leadStatusSchema, manualLeadSchema } from "@/lib/validation";
+import { leadContactSchema, leadSearchFormSchema, leadStatusSchema, manualLeadSchema } from "@/lib/validation";
 import { AppError } from "@/lib/errors";
 import type { ActionState } from "@/lib/action-state";
 
@@ -91,6 +91,17 @@ export async function findEmailsAction(_: ActionState, fd: FormData): Promise<Ac
     const res = await startEmailDiscovery(ctx, ids);
     revalidatePath("/leads");
     return { ok: true, message: `${res.count} firmanın sitesinde e-posta aranıyor; ilerleme ve sonuç listenin üstünde görünecek.` };
+  });
+}
+
+export async function updateLeadContactAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  return safeAction(async () => {
+    const ctx = await requireTenant();
+    const input = parseForm(leadContactSchema, fd);
+    await updateLeadContactInfo(ctx, input);
+    revalidatePath(`/leads/${input.id}`);
+    revalidatePath("/leads");
+    return { ok: true, message: "İletişim bilgileri kaydedildi." };
   });
 }
 

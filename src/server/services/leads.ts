@@ -7,6 +7,7 @@ import { audit } from "@/server/audit/audit";
 import { AppError } from "@/lib/errors";
 import {
   extractDomain,
+  isCompanyEmail,
   isGenericEmail,
   normalizeCompanyName,
   normalizeEmail,
@@ -125,6 +126,37 @@ export async function updateLeadStatus(ctx: TenantContext, id: string, status: L
     entityId: id,
     metadata: { status },
   });
+}
+
+/**
+ * Kurumsal iletişim bilgilerini elle düzeltir (ör. robots.txt ile taramayı yasaklayan sitedeki adresi
+ * kullanıcı kendisi okuyup girer). Kişisel adresler buraya yazılmaz — KVKK: kişiler ayrı tutulur.
+ */
+export async function updateLeadContactInfo(ctx: TenantContext, input: { id: string; website?: string | null; phone?: string | null; genericEmail?: string | null }) {
+  assertCan(ctx, "lead.write");
+  const db = tenantDb(ctx);
+  const lead = await db.lead.findUnique({ where: { id: input.id }, select: { id: true, website: true } });
+  if (!lead) throw new AppError("NOT_FOUND", "Lead bulunamadı.");
+
+  const website = input.website?.trim() || null;
+  const domain = website ? extractDomain(website) : null;
+  if (website && !domain) throw new AppError("VALIDATION", "Web adresi geçersiz.", { website: "Geçersiz adres" });
+  const phone = input.phone?.trim() || null;
+  const normalizedPhone = phone ? normalizePhone(phone) : null;
+  if (phone && !normalizedPhone) throw new AppError("VALIDATION", "Telefon numarası geçersiz.", { phone: "Geçersiz numara" });
+  const email = input.genericEmail?.trim() ? normalizeEmail(input.genericEmail) : null;
+  if (input.genericEmail?.trim() && !email) throw new AppError("VALIDATION", "E-posta adresi geçersiz.", { genericEmail: "Geçersiz adres" });
+  if (email && !isCompanyEmail(email, website ?? lead.website)) {
+    throw new AppError("VALIDATION", "Bu adres bir kişiye ait görünüyor. Buraya yalnızca kurumsal adres girin (info@, satis@, satinalma@…).", {
+      genericEmail: "Kişisel adres",
+    });
+  }
+
+  await db.lead.update({
+    where: { id: lead.id },
+    data: { website: website ? (/^https?:\/\//i.test(website) ? website : `https://${website}`) : null, domain, phone, normalizedPhone, genericEmail: email },
+  });
+  await audit({ companyId: ctx.companyId, userId: ctx.userId, action: "lead.contact_updated", entityType: "Lead", entityId: lead.id, metadata: { website: Boolean(website), phone: Boolean(phone), email: Boolean(email) } });
 }
 
 export async function deleteLead(ctx: TenantContext, id: string) {

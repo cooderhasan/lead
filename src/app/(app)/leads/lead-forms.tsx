@@ -7,6 +7,7 @@ import {
   researchLeadAction,
   scoreLeadsAction,
   searchLeadsAction,
+  updateLeadContactAction,
 } from "@/app/actions/leads";
 import { reviewComplianceAction } from "@/app/actions/email";
 import { addReplyAction } from "@/app/actions/conversations";
@@ -110,6 +111,29 @@ export function ManualLeadForm() {
             </Field>
           </div>
           <SubmitButton pendingText="Kaydediliyor…" className="self-start">Kaydet</SubmitButton>
+        </>
+      )}
+    </ActionForm>
+  );
+}
+
+export function LeadContactForm({ lead }: { lead: { id: string; website: string | null; phone: string | null; genericEmail: string | null } }) {
+  return (
+    <ActionForm action={updateLeadContactAction} className="gap-3">
+      {(state) => (
+        <>
+          <input type="hidden" name="id" value={lead.id} />
+          <Field label="Kurumsal e-posta" htmlFor="c-email" hint="info@, satis@, satinalma@… Kişisel adresler buraya girilmez." error={state.fieldErrors?.genericEmail}>
+            <Input id="c-email" name="genericEmail" type="email" defaultValue={lead.genericEmail ?? ""} />
+          </Field>
+          <Field label="Telefon" htmlFor="c-phone" error={state.fieldErrors?.phone}>
+            <Input id="c-phone" name="phone" type="tel" defaultValue={lead.phone ?? ""} />
+          </Field>
+          <Field label="Web sitesi" htmlFor="c-web" error={state.fieldErrors?.website}>
+            <Input id="c-web" name="website" defaultValue={lead.website ?? ""} placeholder="ornek.com.tr" />
+          </Field>
+          <SubmitButton size="sm" pendingText="Kaydediliyor…" className="self-start">Kaydet</SubmitButton>
+          <FormMessage state={state} />
         </>
       )}
     </ActionForm>

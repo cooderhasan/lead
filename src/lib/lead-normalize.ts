@@ -86,15 +86,41 @@ export function pickCompanyEmail(emails: string[], website: string | null | unde
     const key = local.replace(/[._-]/g, "");
     const sameDomain = Boolean(site && (domain === site || domain.endsWith(`.${site}`) || site.endsWith(`.${domain}`)));
     if (sameDomain) {
-      if (!isGenericEmail(email) || NEVER_PICK.has(key)) continue;
-      const i = EMAIL_PREFERENCE.indexOf(key);
-      candidates.push({ email, rank: i === -1 ? EMAIL_PREFERENCE.length : i });
-    } else if (FREE_MAIL.test(domain) && siteToken.length >= 4 && key.includes(siteToken)) {
-      candidates.push({ email, rank: EMAIL_PREFERENCE.length + 1 });
+      if (NEVER_PICK.has(key)) continue;
+      if (isGenericEmail(email)) {
+        const i = EMAIL_PREFERENCE.indexOf(key);
+        candidates.push({ email, rank: i === -1 ? EMAIL_PREFERENCE.length : i });
+      } else if (sharesCompanyName(key, siteToken)) {
+        // Firma adıyla açılmış kutu (trend@trendmakine.com) kurumsaldır; kişi adı (murat@…) değildir
+        candidates.push({ email, rank: EMAIL_PREFERENCE.length + 1 });
+      }
+    } else if (FREE_MAIL.test(domain) && sharesCompanyName(key, siteToken)) {
+      // Ücretsiz serviste firma adını taşıyan adres (otopehlivan@gmail.com ↔ pehlivanoto.com)
+      candidates.push({ email, rank: EMAIL_PREFERENCE.length + 2 });
     }
   }
   candidates.sort((a, b) => a.rank - b.rank);
   return candidates[0]?.email ?? null;
+}
+
+/** Kurumsal adres mi? Genel kutu (info@…) veya firma adıyla açılmış kutu (trend@trendmakine.com). Kişi adı değil. */
+export function isCompanyEmail(email: string, website: string | null | undefined): boolean {
+  if (isGenericEmail(email)) return true;
+  const siteToken = extractDomain(website ?? "")?.split(".")[0]?.replace(/-/g, "") ?? "";
+  return sharesCompanyName((email.split("@")[0] ?? "").replace(/[._-]/g, ""), siteToken);
+}
+
+/**
+ * E-posta kutusu adı firma adından türemiş mi? Ortak en az 5 harflik parça
+ * (kısa adlarda 4) veya kutu adı alan adının başı (trend ↔ trendmakine).
+ */
+function sharesCompanyName(local: string, siteToken: string): boolean {
+  const a = local.replace(/\d+/g, "");
+  if (a.length < 4 || siteToken.length < 4) return false;
+  if (siteToken.startsWith(a) || a.startsWith(siteToken)) return true;
+  const min = Math.min(5, a.length, siteToken.length);
+  for (let i = 0; i + min <= a.length; i++) if (siteToken.includes(a.slice(i, i + min))) return true;
+  return false;
 }
 
 /** Kurumsal genel kutu mu (info@…) yoksa kişiye ait mi? Kişisel adresler LeadContact'ta ayrı tutulur. */

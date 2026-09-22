@@ -263,7 +263,7 @@ function EmailDiscoverySummary({ run }: { run: NonNullable<Awaited<ReturnType<ty
   if (run.status !== "SUCCEEDED") {
     return <Alert tone="danger">E-posta araması tamamlanamadı{run.error ? `: ${run.error}` : "."} Tekrar deneyebilirsiniz.</Alert>;
   }
-  const missing = run.notFound + run.failed;
+  const missing = run.notFound + run.blocked + run.failed;
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0">
@@ -273,9 +273,15 @@ function EmailDiscoverySummary({ run }: { run: NonNullable<Awaited<ReturnType<ty
         <div className="mt-1.5 flex flex-wrap gap-2">
           <Badge tone="success">{run.found} firmada bulundu</Badge>
           {run.notFound > 0 && <Badge>{run.notFound} sitede kurumsal adres yok</Badge>}
-          {run.failed > 0 && <Badge tone="warning">{run.failed} siteye ulaşılamadı</Badge>}
+          {run.blocked > 0 && <Badge title="Site robots.txt ile otomatik taramayı yasaklıyor; buna uyuyoruz">{run.blocked} site taramaya izin vermiyor</Badge>}
+          {run.failed > 0 && <Badge tone="warning" title="Alan adı yok, site kapalı veya bağlantıyı reddediyor">{run.failed} site açılmıyor</Badge>}
           <span className="text-xs text-text-3 self-center">toplam {run.total} firma</span>
         </div>
+        {run.blocked > 0 && (
+          <p className="mt-2 text-xs text-text-3">
+            Taramaya izin vermeyen sitelerdeki adresi kendiniz görüp firmanın sayfasında &quot;İletişim bilgilerini düzenle&quot; ile girebilirsiniz.
+          </p>
+        )}
       </div>
       {missing > 0 && (
         <LinkButton href="/calls?view=all&noEmail=1" variant="secondary" size="sm">
