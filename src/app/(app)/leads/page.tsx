@@ -265,29 +265,57 @@ function EmailDiscoverySummary({ run }: { run: NonNullable<Awaited<ReturnType<ty
   }
   const missing = run.notFound + run.blocked + run.failed;
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div className="min-w-0">
-        <p className="text-sm font-medium text-text">
-          Son e-posta araması{when ? <span className="font-normal text-text-3"> · {when}</span> : null}
-        </p>
-        <div className="mt-1.5 flex flex-wrap gap-2">
-          <Badge tone="success">{run.found} firmada bulundu</Badge>
-          {run.notFound > 0 && <Badge>{run.notFound} sitede kurumsal adres yok</Badge>}
-          {run.blocked > 0 && <Badge title="Site robots.txt ile otomatik taramayı yasaklıyor; buna uyuyoruz">{run.blocked} site taramaya izin vermiyor</Badge>}
-          {run.failed > 0 && <Badge tone="warning" title="Alan adı yok, site kapalı veya bağlantıyı reddediyor">{run.failed} site açılmıyor</Badge>}
-          <span className="text-xs text-text-3 self-center">toplam {run.total} firma</span>
-        </div>
-        {run.blocked > 0 && (
-          <p className="mt-2 text-xs text-text-3">
-            Taramaya izin vermeyen sitelerdeki adresi kendiniz görüp firmanın sayfasında &quot;İletişim bilgilerini düzenle&quot; ile girebilirsiniz.
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-text">
+            Son e-posta araması{when ? <span className="font-normal text-text-3"> · {when}</span> : null}
           </p>
+          <div className="mt-1.5 flex flex-wrap gap-2">
+            <Badge tone="success">{run.found} firmada bulundu</Badge>
+            {run.notFound > 0 && <Badge>{run.notFound} sitede kurumsal adres yok</Badge>}
+            {run.blocked > 0 && <Badge title="Site robots.txt ile otomatik taramayı yasaklıyor; buna uyuyoruz">{run.blocked} site taramaya izin vermiyor</Badge>}
+            {run.failed > 0 && <Badge tone="warning" title="Alan adı yok, site kapalı veya bağlantıyı reddediyor">{run.failed} site açılmıyor</Badge>}
+            <span className="text-xs text-text-3 self-center">toplam {run.total} firma</span>
+          </div>
+          {run.blocked > 0 && (
+            <p className="mt-2 text-xs text-text-3">
+              Taramaya izin vermeyen sitelerdeki adresi kendiniz görüp firmanın sayfasında &quot;İletişim bilgilerini düzenle&quot; ile girebilirsiniz.
+            </p>
+          )}
+        </div>
+        {missing > 0 && (
+          <LinkButton href="/calls?view=all&noEmail=1" variant="secondary" size="sm">
+            <Phone className="size-4" aria-hidden /> Bulunamayanları telefonla ara
+          </LinkButton>
         )}
       </div>
-      {missing > 0 && (
-        <LinkButton href="/calls?view=all&noEmail=1" variant="secondary" size="sm">
-          <Phone className="size-4" aria-hidden /> Bulunamayanları telefonla ara
-        </LinkButton>
+      {run.items.length > 0 && (
+        <details className="group rounded-lg border border-border">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-accent-text">Firma firma sonuçları göster ({run.items.length})</summary>
+          <ul className="divide-y divide-border border-t border-border">
+            {[...run.items]
+              .sort((a, b) => OUTCOME_ORDER.indexOf(a.outcome) - OUTCOME_ORDER.indexOf(b.outcome))
+              .map((it) => (
+                <li key={it.leadId} className="flex flex-col gap-1 px-3 py-2.5 sm:flex-row sm:items-center sm:gap-3">
+                  <span className="shrink-0 sm:w-40"><Badge tone={OUTCOME_META[it.outcome].tone}>{OUTCOME_META[it.outcome].label}</Badge></span>
+                  <Link href={`/leads/${it.leadId}`} className="min-w-0 truncate text-sm font-medium text-text hover:text-accent-text sm:w-72 sm:shrink-0">{it.name}</Link>
+                  <span className="min-w-0 flex-1 text-xs text-text-2">
+                    {it.outcome === "found" ? <span className="font-medium text-success">{it.email}</span> : it.reason}
+                  </span>
+                </li>
+              ))}
+          </ul>
+        </details>
       )}
     </div>
   );
 }
+
+const OUTCOME_ORDER = ["found", "blocked", "notFound", "failed"] as const;
+const OUTCOME_META: Record<(typeof OUTCOME_ORDER)[number], { label: string; tone: "success" | "neutral" | "warning" }> = {
+  found: { label: "Bulundu", tone: "success" },
+  blocked: { label: "Taramaya izin yok", tone: "neutral" },
+  notFound: { label: "Kurumsal adres yok", tone: "neutral" },
+  failed: { label: "Site açılmıyor", tone: "warning" },
+};

@@ -27,7 +27,7 @@ import { evidenceFound, valueFound } from "./evidence";
 import { saveDiscoveredLeads } from "./leads";
 import { AppError } from "@/lib/errors";
 import { computeReachability, finalizeScore } from "@/lib/lead-scoring";
-import { isGenericEmail, normalizeEmail, normalizePhone, pickCompanyEmail } from "@/lib/lead-normalize";
+import { extractDomain, isGenericEmail, normalizeEmail, normalizePhone, pickCompanyEmail } from "@/lib/lead-normalize";
 
 const REFRESH_DAYS = 90;
 
@@ -610,31 +610,54 @@ export async function startEmailDiscovery(ctx: TenantContext, leadIds: string[])
 }
 
 /** İş içinden çağrılır. Bir sitenin hatası diğerlerini durdurmaz. */
+export type EmailDiscoveryOutcome = "found" | "notFound" | "blocked" | "failed";
+export interface EmailDiscoveryItem {
+  leadId: string;
+  name: string;
+  outcome: EmailDiscoveryOutcome;
+  /** Bulunan kurumsal adres (yalnızca "found") */
+  email?: string;
+  /** Kullanıcıya gösterilen neden (kişisel adresler yazılmaz — yalnızca türü söylenir) */
+  reason?: string;
+}
+
 export async function findLeadEmails(companyId: string, leadIds: string[], progress?: (pct: number) => Promise<void>) {
   const db = tenantDb({ companyId });
-  let found = 0;
-  let notFound = 0;
-  let blocked = 0;
-  let failed = 0;
+  const items: EmailDiscoveryItem[] = [];
   for (const [i, leadId] of leadIds.entries()) {
-    const lead = await db.lead.findUnique({ where: { id: leadId }, select: { id: true, website: true, genericEmail: true } });
+    const lead = await db.lead.findUnique({ where: { id: leadId }, select: { id: true, companyName: true, website: true, genericEmail: true } });
     if (!lead?.website || lead.genericEmail) continue;
+    const base = { leadId, name: lead.companyName };
     try {
       const crawl = await crawlSite(lead.website, { maxPages: 3, ensureContactPage: true, allowPrivateHosts: allowPrivateFetch() });
-      const email = pickCompanyEmail(crawl.pages.flatMap((p) => p.emails), lead.website);
+      const seen = [...new Set(crawl.pages.flatMap((p) => p.emails))];
+      const email = pickCompanyEmail(seen, lead.website);
       if (email) {
         // Bu arada elle girilmiş adres varsa üzerine yazılmaz
         const res = await db.lead.updateMany({ where: { id: leadId, genericEmail: null }, data: { genericEmail: email } });
-        if (res.count) found++;
-      } else notFound++;
+        if (res.count) items.push({ ...base, outcome: "found", email });
+      } else {
+        items.push({ ...base, outcome: "notFound", reason: whyNoEmail(seen, lead.website, crawl.pages.length) });
+      }
     } catch (err) {
       // robots.txt yasağı ayrı sayılır: site açık ama taranmamızı istemiyor (buna uyulur)
-      if (err instanceof FetchBlockedError) blocked++;
-      else failed++;
+      if (err instanceof FetchBlockedError) items.push({ ...base, outcome: "blocked", reason: "Site robots.txt ile otomatik taramayı yasaklıyor." });
+      else items.push({ ...base, outcome: "failed", reason: (err as Error).message.slice(0, 200) });
     }
     await progress?.(Math.round(((i + 1) / leadIds.length) * 100));
   }
-  return { found, notFound, blocked, failed };
+  const count = (o: EmailDiscoveryOutcome) => items.filter((x) => x.outcome === o).length;
+  return { found: count("found"), notFound: count("notFound"), blocked: count("blocked"), failed: count("failed"), items };
+}
+
+/** Sitede adres varsa neden seçilmediğini adresi yazmadan açıklar */
+function whyNoEmail(seen: string[], website: string, pages: number): string {
+  if (seen.length === 0) return `Taranan ${pages} sayfada e-posta adresi yok (iletişim formu kullanıyor olabilir).`;
+  const site = extractDomain(website);
+  const sameDomain = seen.filter((e) => site && (e.endsWith(`@${site}`) || e.endsWith(`.${site}`)));
+  if (sameDomain.length) return "Sitede yalnızca kişiye ait adres var; kişisel adresler otomatik alınmaz.";
+  const domains = [...new Set(seen.map((e) => e.split("@")[1]).filter(Boolean))].slice(0, 2).join(", ");
+  return `Sitedeki adres başka bir alan adına ait (${domains}) — grup şirketi veya ajans olabilir.`;
 }
 
 /** Son 24 saatteki e-posta araması (liste üstünde özet / ilerleme için) */
@@ -646,7 +669,7 @@ export async function getLastEmailDiscovery(ctx: TenantContext) {
   });
   if (!job) return null;
   const total = ((job.payload as { leadIds?: string[] } | null)?.leadIds ?? []).length;
-  const r = (job.result ?? {}) as { found?: number; notFound?: number; blocked?: number; failed?: number };
+  const r = (job.result ?? {}) as { found?: number; notFound?: number; blocked?: number; failed?: number; items?: EmailDiscoveryItem[] };
   return {
     id: job.id,
     status: job.status,
@@ -657,5 +680,6 @@ export async function getLastEmailDiscovery(ctx: TenantContext) {
     notFound: r.notFound ?? 0,
     blocked: r.blocked ?? 0,
     failed: r.failed ?? 0,
+    items: r.items ?? [],
   };
 }

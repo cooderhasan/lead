@@ -72,7 +72,8 @@ describe("kurumsal e-posta seçimi", () => {
       const res = await findLeadEmails(a.companyId, [withSite!, noSite!]);
       expect(site.hits).toContain("/iletisim");
       // Sitesiz lead atlanır (sayılmaz)
-      expect(res).toEqual({ found: 1, notFound: 0, blocked: 0, failed: 0 });
+      expect(res).toMatchObject({ found: 1, notFound: 0, blocked: 0, failed: 0 });
+      expect(res.items).toEqual([{ leadId: withSite, name: "Siteli", outcome: "found", email: "satis@127.0.0.1" }]);
       expect((await rawDb.lead.findUniqueOrThrow({ where: { id: withSite } })).genericEmail).toBe("satis@127.0.0.1");
       expect((await rawDb.company.findUniqueOrThrow({ where: { id: a.companyId } })).creditBalance).toBe(credits);
     } finally {
@@ -90,7 +91,9 @@ describe("kurumsal e-posta seçimi", () => {
     expect(res.count).toBe(1);
     await drainInlineJobs();
     // Özet: .invalid siteye ulaşılamaz → "ulaşılamadı" sayılır; B şirketi A'nın aramasını görmez
-    expect(await getLastEmailDiscovery(a)).toMatchObject({ status: "SUCCEEDED", total: 1, found: 0, notFound: 0, blocked: 0, failed: 1 });
+    const last = await getLastEmailDiscovery(a);
+    expect(last).toMatchObject({ status: "SUCCEEDED", total: 1, found: 0, notFound: 0, blocked: 0, failed: 1 });
+    expect(last!.items).toEqual([{ leadId: ok, name: "X", outcome: "failed", reason: expect.stringMatching(/Alan adı bulunamadı/) }]);
     expect(await getLastEmailDiscovery(b)).toBeNull();
     const viewer = await createTenant("V", "VIEWER");
     await expect(startEmailDiscovery(viewer, [ok!])).rejects.toThrow();
