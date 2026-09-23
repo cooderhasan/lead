@@ -453,15 +453,27 @@ function PreparationSummary({ run }: { run: NonNullable<Awaited<ReturnType<typeo
   }
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-sm font-medium text-text">Son hazırlık: {run.total} firma</p>
+      <p className="text-sm font-medium text-text">
+        Son hazırlık: {run.total} firma
+        <span className="ml-2 font-normal text-text-3">
+          Adımlar: {[run.steps.email && "e-posta bul", run.steps.research && "analiz et", run.steps.score && "puanla"].filter(Boolean).join(" · ") || "yok"}
+        </span>
+      </p>
       <div className="flex flex-wrap gap-2">
-        <Badge tone="accent">{run.researched ?? 0} analiz edildi</Badge>
-        <Badge>{run.scored ?? 0} puanlandı</Badge>
-        <Badge tone="success">{run.high ?? 0} firma 70+ puan</Badge>
+        {run.steps.research && <Badge tone="accent">{run.researched ?? 0} analiz edildi</Badge>}
+        {(run.steps.research || run.steps.score) && <Badge>{run.scored ?? 0} puanlandı</Badge>}
+        {(run.steps.research || run.steps.score) && <Badge tone="success">{run.high ?? 0} firma 70+ puan</Badge>}
+        {run.steps.email && <Badge>{run.emailsFound ?? 0} firmada e-posta bulundu</Badge>}
         <Badge>{run.withEmail ?? 0} firmanın e-postası var</Badge>
         {run.failed ? <Badge tone="warning">{run.failed} firmada hata</Badge> : null}
         {run.refunded ? <span className="self-center text-xs text-text-3">{run.refunded} kredi iade edildi</span> : null}
       </div>
+      {!run.steps.research && !run.steps.score && (
+        <p className="text-xs text-text-3">
+          Bu çalıştırmada yalnızca e-posta arandı. Analiz ve puanlama için işlem çubuğunda &quot;Analiz et&quot; ve &quot;Puanla&quot; seçeneklerini işaretleyin
+          (analiz için firmanın web sitesi gerekir).
+        </p>
+      )}
       {run.top && run.top.length > 0 && (
         <p className="text-xs text-text-2">
           En yüksek puanlılar:{" "}

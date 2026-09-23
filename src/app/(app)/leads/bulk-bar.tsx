@@ -79,6 +79,7 @@ export function BulkBar({
   const [pageCount, setPageCount] = useState(0);
   const [allMode, setAllMode] = useState(false);
   const [op, setOp] = useState("prepare");
+  const [steps, setSteps] = useState({ p_email: true, p_research: true, p_score: true });
   const formRef = useRef<HTMLFormElement>(null);
   const confirmed = useRef(false);
 
@@ -122,11 +123,19 @@ export function BulkBar({
         window.alert(est.error ?? "Tahmin hesaplanamadı.");
         return;
       }
+      if (!est.count) {
+        window.alert("Seçili adımlarda yapılacak iş çıkmadı.\n\nAnaliz ve e-posta araması için firmanın web sitesi gerekir; e-postası zaten olan firmada arama yapılmaz.");
+        return;
+      }
+      const lines = [
+        est.research ? `• ${est.research} firma analiz edilip puanlanacak (${est.research * 2} kredi)` : null,
+        est.scoreOnly ? `• ${est.scoreOnly} firma (web sitesi yok) yalnızca puanlanacak (${est.scoreOnly} kredi)` : null,
+        est.emailOnly ? `• ${est.emailOnly} firmada yalnızca e-posta aranacak (ücretsiz)` : null,
+      ].filter(Boolean);
       msg =
         `${est.count} firma hazırlanacak${est.capped ? " (tek seferde en fazla 50)" : ""}:\n` +
-        `• ${est.research} firma analiz edilip puanlanacak\n` +
-        (est.scoreOnly ? `• ${est.scoreOnly} firma (web sitesi yok) yalnızca puanlanacak\n` : "") +
-        (est.emailOnly ? `• ${est.emailOnly} firmada e-posta aranacak (ücretsiz)\n` : "") +
+        `${lines.join("\n")}\n` +
+        (!est.research && !est.scoreOnly ? "\nUYARI: Analiz ve puanlama yapılmayacak. İstiyorsanız 'Analiz et' / 'Puanla' seçeneklerini işaretleyin.\n" : "") +
         `\nEn fazla ${est.credits} kredi. Yapılamayan adımın kredisi iade edilir. Devam edilsin mi?`;
     } else if (op === "delete") {
       msg = `${count} firma kalıcı olarak silinecek. Bu işlem geri alınamaz. Emin misiniz?`;
@@ -162,10 +171,23 @@ export function BulkBar({
               ))}
             </Select>
             {op === "prepare" && (
-              <div className="flex flex-wrap items-center gap-3 text-xs text-text-2">
-                {[["p_email", "E-posta bul"], ["p_research", "Analiz et"], ["p_score", "Puanla"]].map(([n, l]) => (
-                  <label key={n} className="flex items-center gap-1.5">
-                    <input type="checkbox" name={n} defaultChecked className="size-3.5 accent-[var(--accent)]" /> {l}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {([["p_email", "E-posta bul"], ["p_research", "Analiz et"], ["p_score", "Puanla"]] as const).map(([n, l]) => (
+                  <label
+                    key={n}
+                    className={cn(
+                      "flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors",
+                      steps[n] ? "border-accent bg-accent-soft text-accent-text" : "border-border text-text-3 hover:text-text",
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      name={n}
+                      checked={steps[n]}
+                      onChange={(e) => setSteps((s) => ({ ...s, [n]: e.target.checked }))}
+                      className="size-3.5 accent-[var(--accent)]"
+                    />
+                    {l}
                   </label>
                 ))}
               </div>

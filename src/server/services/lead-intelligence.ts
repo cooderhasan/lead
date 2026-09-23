@@ -1151,6 +1151,12 @@ export async function getLastPreparation(ctx: TenantContext) {
   });
   if (!job) return null;
   const r = (job.result ?? {}) as Partial<Awaited<ReturnType<typeof runPreparation>>>;
-  const total = ((job.payload as { plan?: unknown[] } | null)?.plan ?? []).length;
-  return { id: job.id, status: job.status, error: job.error, finishedAt: job.finishedAt, total, ...r };
+  const plan = ((job.payload as { plan?: PreparePlanItem[] } | null)?.plan ?? []) as PreparePlanItem[];
+  // Hangi adımların gerçekten planlandığı (özet "ne yapıldı" diyebilsin)
+  const steps = {
+    email: plan.some((p) => p.email),
+    research: plan.some((p) => p.research),
+    score: plan.some((p) => p.score),
+  };
+  return { id: job.id, status: job.status, error: job.error, finishedAt: job.finishedAt, total: plan.length, steps, ...r };
 }
