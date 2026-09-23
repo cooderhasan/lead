@@ -7,6 +7,7 @@ import { findPlatformSuppressions } from "@/server/tenancy/global-suppression";
 import { audit } from "@/server/audit/audit";
 import { AppError } from "@/lib/errors";
 import { evaluateEmailCompliance } from "@/lib/compliance";
+import { checkMailDomain } from "@/server/providers/email/mx";
 import { extractDomain, normalizeEmail, normalizePhone } from "@/lib/lead-normalize";
 
 /** Gönderilmemiş (iptal edilebilir) mesaj durumları */
@@ -220,6 +221,7 @@ export async function refreshLeadCompliance(companyId: string, leadId: string) {
     const basis = existing?.reviewedAt ? existing.communicationBasis : cand.basis;
     const evaluation = evaluateEmailCompliance({
       address: cand.address,
+      mailDomain: await checkMailDomain(cand.address.split("@")[1] ?? ""),
       contactType: cand.contactType,
       basis,
       consent: cand.consent,

@@ -30,6 +30,8 @@ import { saveDiscoveredLeads } from "./leads";
 import { AppError } from "@/lib/errors";
 import { computeReachability, finalizeScore } from "@/lib/lead-scoring";
 import { extractDomain, isCompanyEmail, isGenericEmail, normalizeEmail, normalizePhone, pickCompanyEmail } from "@/lib/lead-normalize";
+import { checkEmailQuality } from "@/lib/email-quality";
+import { checkMailDomain } from "@/server/providers/email/mx";
 
 const REFRESH_DAYS = 90;
 
@@ -644,7 +646,14 @@ export async function findLeadEmails(companyId: string, leadIds: string[], progr
     try {
       const crawl = await crawlSite(lead.website, { maxPages: 3, ensureContactPage: true, allowPrivateHosts: allowPrivateFetch() });
       const seen = [...new Set(crawl.pages.flatMap((p) => p.emails))];
-      const email = pickCompanyEmail(seen, lead.website);
+      let email = pickCompanyEmail(seen, lead.website);
+      // Sitede yazan adres geri dönecekse (alan adı posta almıyor) kaydedilmez
+      if (email && (checkEmailQuality(email).blocking || (await checkMailDomain(email.split("@")[1] ?? "")) === "no_mx")) {
+        items.push({ ...base, outcome: "notFound", reason: "Sitedeki e-posta adresinin alan adı posta alamıyor (ileti geri döner)." });
+        email = null;
+        await progress?.(Math.round(((i + 1) / leadIds.length) * 100));
+        continue;
+      }
       if (email) {
         // Bu arada elle girilmiş adres varsa üzerine yazılmaz
         const res = await db.lead.updateMany({ where: { id: leadId, genericEmail: null }, data: { genericEmail: email } });

@@ -8,6 +8,7 @@
  */
 import type { CommunicationBasis, ComplianceStatus, ConsentStatus, ContactType } from "@prisma/client";
 import { isGenericEmail, normalizeEmail } from "./lead-normalize";
+import { checkEmailQuality } from "./email-quality";
 
 export const FREE_MAIL_DOMAINS = new Set([
   "gmail.com", "googlemail.com", "hotmail.com", "hotmail.com.tr", "outlook.com", "outlook.com.tr", "live.com",
@@ -29,6 +30,8 @@ export interface ComplianceInput {
   lastContactedAt?: Date | null;
   /** Bir kullanıcı adresi inceleyip dayanak seçtiyse (ComplianceRecord.reviewedAt) */
   reviewed?: boolean;
+  /** Alan adının DNS'te posta kaydı var mı (sunucuda bakılır; "unknown" gönderimi engellemez) */
+  mailDomain?: "ok" | "no_mx" | "unknown";
   now?: Date;
 }
 
@@ -46,6 +49,15 @@ export function evaluateEmailCompliance(i: ComplianceInput): ComplianceResult {
   }
   const [local, domain = ""] = address.split("@");
   if (NO_REPLY.test(local ?? "")) return { status: "DO_NOT_SEND", reasons: ["Yanıt kabul etmeyen sistem adresi."] };
+
+  // Teslim edilebilirlik: geri döneceği belli adres gönderilmez (bounce oranı alan adı itibarını bozar)
+  const quality = checkEmailQuality(address);
+  if (quality.blocking) {
+    return { status: "DO_NOT_SEND", reasons: [quality.message ?? "Adres geçersiz.", ...(quality.suggestion ? [`Doğrusu şu olabilir: ${quality.suggestion}`] : [])] };
+  }
+  if (i.mailDomain === "no_mx") {
+    return { status: "DO_NOT_SEND", reasons: ["Alan adının posta sunucusu yok (DNS'te MX/A kaydı bulunamadı) — ileti kesin geri döner."] };
+  }
 
   const reasons: string[] = [];
   const now = i.now ?? new Date();

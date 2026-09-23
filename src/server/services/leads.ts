@@ -14,6 +14,8 @@ import {
   normalizePhone,
 } from "@/lib/lead-normalize";
 import type { RawLead } from "@/server/providers/lead-source/types";
+import { checkMailDomain } from "@/server/providers/email/mx";
+import { checkEmailQuality } from "@/lib/email-quality";
 import { emitEvent } from "./integrations";
 
 export const LEAD_STATUS_LABELS: Record<LeadStatus, string> = {
@@ -197,6 +199,13 @@ export async function updateLeadContactInfo(ctx: TenantContext, input: { id: str
   if (phone && !normalizedPhone) throw new AppError("VALIDATION", "Telefon numarası geçersiz.", { phone: "Geçersiz numara" });
   const email = input.genericEmail?.trim() ? normalizeEmail(input.genericEmail) : null;
   if (input.genericEmail?.trim() && !email) throw new AppError("VALIDATION", "E-posta adresi geçersiz.", { genericEmail: "Geçersiz adres" });
+  if (email) {
+    const q = checkEmailQuality(email);
+    if (q.blocking) throw new AppError("VALIDATION", q.suggestion ? `${q.message} (${q.suggestion})` : (q.message ?? "Adres geçersiz."), { genericEmail: "Geçersiz adres" });
+    if ((await checkMailDomain(q.domain ?? "")) === "no_mx") {
+      throw new AppError("VALIDATION", "Bu alan adı e-posta alamıyor (DNS'te posta kaydı yok). Adresi kontrol edin.", { genericEmail: "Alan adı posta almıyor" });
+    }
+  }
   if (email && !isCompanyEmail(email, website ?? lead.website)) {
     throw new AppError("VALIDATION", "Bu adres bir kişiye ait görünüyor. Buraya yalnızca kurumsal adres girin (info@, satis@, satinalma@…).", {
       genericEmail: "Kişisel adres",
