@@ -20,6 +20,10 @@ const NO_REPLY = /^(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounce)/i;
 /** Aynı adrese iki ileti arasında en az bu kadar gün (frekans sınırı) */
 export const MIN_DAYS_BETWEEN_CONTACTS = 3;
 
+/** Aynı FİRMAYA son 30 günde en fazla bu kadar ticari ileti (yanıt yazışmaları sayılmaz) */
+export const MAX_CONTACTS_PER_MONTH = 2;
+export const CONTACT_WINDOW_DAYS = 30;
+
 export interface ComplianceInput {
   address: string | null | undefined;
   contactType: ContactType;
@@ -32,6 +36,10 @@ export interface ComplianceInput {
   reviewed?: boolean;
   /** Alan adının DNS'te posta kaydı var mı (sunucuda bakılır; "unknown" gönderimi engellemez) */
   mailDomain?: "ok" | "no_mx" | "unknown";
+  /** Aynı firmanın BAŞKA bir adresine en son ne zaman ileti gönderildi (info@ ve satis@ ayrı sayılmasın) */
+  domainLastContactedAt?: Date | null;
+  /** Bu firmaya son 30 günde gönderilen ticari ileti sayısı (yanıtlar hariç) */
+  contactsInWindow?: number;
   now?: Date;
 }
 
@@ -63,6 +71,16 @@ export function evaluateEmailCompliance(i: ComplianceInput): ComplianceResult {
   const now = i.now ?? new Date();
   if (i.lastContactedAt && now.getTime() - i.lastContactedAt.getTime() < MIN_DAYS_BETWEEN_CONTACTS * 86_400_000) {
     return { status: "REVIEW_REQUIRED", reasons: [`Son ${MIN_DAYS_BETWEEN_CONTACTS} gün içinde bu adrese ileti gönderildi.`] };
+  }
+  // Aynı firmanın başka adresi (info@ ve satis@) ayrı alıcı değildir — firma iki ileti almasın
+  if (i.domainLastContactedAt && now.getTime() - i.domainLastContactedAt.getTime() < MIN_DAYS_BETWEEN_CONTACTS * 86_400_000) {
+    return { status: "REVIEW_REQUIRED", reasons: [`Aynı firmanın başka bir adresine son ${MIN_DAYS_BETWEEN_CONTACTS} gün içinde ileti gönderildi.`] };
+  }
+  if ((i.contactsInWindow ?? 0) >= MAX_CONTACTS_PER_MONTH) {
+    return {
+      status: "REVIEW_REQUIRED",
+      reasons: [`Bu firmaya son ${CONTACT_WINDOW_DAYS} günde ${i.contactsInWindow} ticari ileti gönderildi (üst sınır ${MAX_CONTACTS_PER_MONTH}).`],
+    };
   }
 
   if (i.reviewed && i.basis !== "NONE") {

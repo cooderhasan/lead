@@ -6,7 +6,7 @@ import type { TenantContext } from "@/server/tenancy/types";
 import { findPlatformSuppressions } from "@/server/tenancy/global-suppression";
 import { audit } from "@/server/audit/audit";
 import { AppError } from "@/lib/errors";
-import { evaluateEmailCompliance } from "@/lib/compliance";
+import { CONTACT_WINDOW_DAYS, evaluateEmailCompliance } from "@/lib/compliance";
 import { checkMailDomain } from "@/server/providers/email/mx";
 import { extractDomain, normalizeEmail, normalizePhone } from "@/lib/lead-normalize";
 
@@ -211,8 +211,29 @@ export async function refreshLeadCompliance(companyId: string, leadId: string) {
     });
   }
 
+  // Firma bazlı sıklık: aynı alan adına son ileti + son 30 gündeki ticari ileti sayısı (yanıtlar hariç)
+  const windowStart = new Date(Date.now() - CONTACT_WINDOW_DAYS * 86_400_000);
+  const contactsInWindow = await db.message.count({
+    where: { leadId, channel: "EMAIL", direction: "OUTBOUND", status: { in: ["SENT", "DELIVERED"] }, conversationId: null, sentAt: { gte: windowStart } },
+  });
+
   const results = [];
   for (const cand of candidates) {
+    const domain = cand.address.split("@")[1] ?? "";
+    const lastToDomain = domain
+      ? await db.message.findFirst({
+          where: {
+            channel: "EMAIL",
+            direction: "OUTBOUND",
+            status: { in: ["SENT", "DELIVERED"] },
+            conversationId: null,
+            toAddress: { endsWith: `@${domain}`, not: cand.address },
+            sentAt: { not: null },
+          },
+          orderBy: { sentAt: "desc" },
+          select: { sentAt: true },
+        })
+      : null;
     const existing = await db.complianceRecord.findUnique({
       where: { companyId_channel_address: { companyId, channel: "EMAIL", address: cand.address } },
     });
@@ -228,6 +249,8 @@ export async function refreshLeadCompliance(companyId: string, leadId: string) {
       optOut: cand.optOut || Boolean(existing?.optOut),
       suppressed: Boolean(suppression),
       lastContactedAt: existing?.lastContactedAt,
+      domainLastContactedAt: lastToDomain?.sentAt ?? null,
+      contactsInWindow,
       reviewed: Boolean(existing?.reviewedAt),
     });
     const data = {

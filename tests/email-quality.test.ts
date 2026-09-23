@@ -95,3 +95,64 @@ describe("elle e-posta girişi", () => {
     expect((await rawDb.lead.findUniqueOrThrow({ where: { id } })).genericEmail).toBe("info@mxvar.com");
   });
 });
+
+describe("firma bazlı gönderim sıklığı", () => {
+  /** Lead + firma genel adresi + kişi adresi (aynı alan adı) */
+  async function leadWithTwoAddresses(companyId: string) {
+    const { leadIds } = await saveDiscoveredLeads(companyId, [{ companyName: "Mx Firma", genericEmail: "info@mxvar.com", sourceType: "MANUAL" }], { provider: "fake" });
+    const leadId = leadIds[0]!;
+    await rawDb.leadContact.create({
+      data: { companyId, leadId, email: "satis@mxvar.com", type: "COMPANY_GENERIC", source: "MANUAL", communicationBasis: "B2B_TRADER_ADDRESS" },
+    });
+    return leadId;
+  }
+  const sent = (companyId: string, leadId: string, to: string, daysAgo: number) =>
+    rawDb.message.create({
+      data: {
+        companyId,
+        leadId,
+        channel: "EMAIL",
+        body: "x",
+        status: "SENT",
+        toAddress: to,
+        sentAt: new Date(Date.now() - daysAgo * 86_400_000),
+      },
+    });
+
+  it("aynı firmanın başka adresine 3 gün içinde ikinci ileti gitmez", async () => {
+    const a = await createTenant("A");
+    const leadId = await leadWithTwoAddresses(a.companyId);
+    expect((await refreshLeadCompliance(a.companyId, leadId)).records.every((r) => r.status === "SENDABLE")).toBe(true);
+
+    await sent(a.companyId, leadId, "info@mxvar.com", 1);
+    const { records } = await refreshLeadCompliance(a.companyId, leadId);
+    const other = records.find((r) => r.address === "satis@mxvar.com")!;
+    expect(other.status).toBe("REVIEW_REQUIRED");
+    expect(other.reasons[0]).toMatch(/başka bir adresine/);
+  });
+
+  it("firmaya 30 günde en fazla 2 ticari ileti; yanıt yazışmaları sayılmaz", async () => {
+    const a = await createTenant("A");
+    const leadId = await leadWithTwoAddresses(a.companyId);
+    await sent(a.companyId, leadId, "info@mxvar.com", 20);
+    await sent(a.companyId, leadId, "satis@mxvar.com", 10);
+
+    const { records } = await refreshLeadCompliance(a.companyId, leadId);
+    expect(records.every((r) => r.status === "REVIEW_REQUIRED")).toBe(true);
+    expect(records[0]!.reasons[0]).toMatch(/son 30 günde 2 ticari ileti/);
+
+    // 30 günden eski ileti sayılmaz
+    await rawDb.message.updateMany({ where: { leadId }, data: { sentAt: new Date(Date.now() - 40 * 86_400_000) } });
+    expect((await refreshLeadCompliance(a.companyId, leadId)).records.every((r) => r.status === "SENDABLE")).toBe(true);
+
+    // Konuşma içindeki yanıt iletileri üst sınıra girmez
+    const conv = await rawDb.conversation.create({ data: { companyId: a.companyId, leadId, channel: "EMAIL" } });
+    for (let i = 0; i < 3; i++) {
+      await rawDb.message.create({
+        data: { companyId: a.companyId, leadId, conversationId: conv.id, channel: "EMAIL", body: "y", status: "SENT", toAddress: "info@mxvar.com", sentAt: new Date(Date.now() - i * 86_400_000) },
+      });
+    }
+    const after = await refreshLeadCompliance(a.companyId, leadId);
+    expect(after.records.find((r) => r.address === "satis@mxvar.com")!.status).toBe("SENDABLE");
+  });
+});
