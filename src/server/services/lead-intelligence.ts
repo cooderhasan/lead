@@ -14,7 +14,8 @@ import {
   type LeadResearchOutput,
 } from "@/server/ai/prompts/lead-research";
 import { LEAD_SCORE_INSTRUCTIONS, LEAD_SCORE_SHAPE, leadScoreSchema } from "@/server/ai/prompts/lead-score";
-import { isLeadSourceConfigured } from "@/server/providers/lead-source";
+import { getWebSearchProvider, isLeadSourceConfigured, isWebSearchConfigured } from "@/server/providers/lead-source";
+import { isNonCompanyHost } from "@/server/providers/lead-source/apify-web";
 import { csvToRawLeads } from "@/server/providers/lead-source/csv";
 import type { LeadSearchQuery, LeadSourceKind, RawLead } from "@/server/providers/lead-source/types";
 import { crawlSite, FetchBlockedError, fetchListPage } from "@/server/web/fetch-site";
@@ -29,7 +30,7 @@ import { evidenceFound, normalizeForMatch, valueFound } from "./evidence";
 import { saveDiscoveredLeads } from "./leads";
 import { AppError } from "@/lib/errors";
 import { computeReachability, finalizeScore } from "@/lib/lead-scoring";
-import { extractDomain, isCompanyEmail, isGenericEmail, normalizeEmail, normalizePhone, pickCompanyEmail } from "@/lib/lead-normalize";
+import { extractDomain, isCompanyEmail, isGenericEmail, nameSimilarity, normalizeEmail, normalizePhone, pickCompanyEmail } from "@/lib/lead-normalize";
 import { checkEmailQuality } from "@/lib/email-quality";
 import { checkMailDomain } from "@/server/providers/email/mx";
 
@@ -1159,4 +1160,167 @@ export async function getLastPreparation(ctx: TenantContext) {
     score: plan.some((p) => p.score),
   };
   return { id: job.id, status: job.status, error: job.error, finishedAt: job.finishedAt, total: plan.length, steps, ...r };
+}
+
+// ── 8) Firma adından web sitesi bulma ─────────────────────────────────
+
+/** Tek çalıştırmada en fazla firma (her firma bir Google araması) */
+export const WEBSITE_DISCOVERY_MAX = 50;
+/** Ad benzerliği bu eşiğin altındaysa site kabul edilmez (yanlış firma bağlanmasın) */
+const NAME_MATCH_MIN = 0.34;
+
+export interface WebsiteMatch {
+  leadId: string;
+  name: string;
+  website: string | null;
+  reason?: string;
+}
+
+/** Ünvan ekleri: arama sonucunu bozar, sorgudan atılır ("A.S." noktasızken "a" ve "s" olarak gelir) */
+const COMPANY_SUFFIXES = new Set([
+  "san", "sanayi", "tic", "ticaret", "ltd", "limited", "sti", "a", "as", "s", "anonim", "sirketi",
+  "kollektif", "koll", "ve", "ith", "ithalat", "ihr", "ihracat", "paz", "pazarlama", "muh",
+  "muhendislik", "ins", "insaat", "taah", "taahhut", "tur", "turizm",
+]);
+
+/** Firma adını arama sorgusuna çevirir: ünvan ekleri ("San. Tic. Ltd. Şti.") aramayı bozar, atılır */
+export function websiteQuery(companyName: string, city?: string | null): string {
+  const cleaned = companyName
+    .replace(/\(.*?\)/g, " ")
+    .replace(/[.,]/g, " ")
+    .split(/\s+/)
+    // normalizeForMatch: Türkçe harfleri sadeleştirir (TİC → tic, ŞTİ → sti)
+    .filter((w) => w && !COMPANY_SUFFIXES.has(normalizeForMatch(w)))
+    .join(" ")
+    .trim();
+  const base = (cleaned.length >= 4 ? cleaned : companyName).slice(0, 80);
+  return [base, city, "resmi web sitesi"].filter(Boolean).join(" ");
+}
+
+/**
+ * Arama sonuçlarından firmanın sitesini seçer. Saf fonksiyon — testlerde doğrudan kullanılır.
+ * Kural: alan adı ya da sayfa başlığı firma adıyla örtüşmeli; dizin / pazaryeri / sosyal medya elenir.
+ */
+export function pickWebsite(companyName: string, results: Array<{ title: string; url: string }>): { website: string | null; reason?: string } {
+  let best: { website: string; score: number } | null = null;
+  for (const r of results.slice(0, 10)) {
+    let url: URL;
+    try {
+      url = new URL(r.url);
+    } catch {
+      continue;
+    }
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    if (isNonCompanyHost(host)) continue;
+    const domain = extractDomain(host);
+    if (!domain) continue;
+
+    const token = domain.split(".")[0]!.replace(/-/g, "");
+    const nameNorm = normalizeForMatch(companyName).replace(/\s+/g, "");
+    // Alan adı firma adının içinde geçiyorsa (ör. "assanaluminyum" ↔ assanaluminyum.com.tr) en güçlü kanıt
+    const domainMatch = token.length >= 5 && (nameNorm.includes(token) || token.includes(nameNorm.slice(0, Math.min(12, nameNorm.length))));
+    const titleScore = nameSimilarity(companyName, r.title);
+    const score = domainMatch ? 1 : titleScore;
+    if (score >= NAME_MATCH_MIN && (!best || score > best.score)) best = { website: `${url.protocol}//${url.hostname}/`, score };
+  }
+  if (!best) return { website: null, reason: results.length ? "Arama sonuçlarında firma adıyla eşleşen site bulunamadı." : "Arama sonucu dönmedi." };
+  return { website: best.website };
+}
+
+/** Firma adından site bulmayı başlatır (her firma 1 kredi; bulunamayanların kredisi iade edilir) */
+export async function startWebsiteDiscovery(ctx: TenantContext, leadIds: string[]) {
+  assertCan(ctx, "lead.write");
+  if (!isWebSearchConfigured()) throw new AppError("VALIDATION", "Web araması kapalı (APIFY_TOKEN tanımlı değil).");
+  const db = tenantDb(ctx);
+  const targets = await db.lead.findMany({
+    where: { id: { in: [...new Set(leadIds)] }, website: null },
+    select: { id: true },
+    take: WEBSITE_DISCOVERY_MAX,
+  });
+  if (targets.length === 0) throw new AppError("VALIDATION", "Seçilenlerin hepsinde web sitesi zaten var.");
+  const running = await db.job.findFirst({ where: { type: "lead.find_website", status: { in: ["QUEUED", "RUNNING"] } }, select: { id: true } });
+  if (running) throw new AppError("CONFLICT", "Bir site araması zaten sürüyor. Bitince yenisini başlatabilirsiniz.");
+
+  const { usageId } = await consumeCredits({
+    companyId: ctx.companyId,
+    operation: "lead.discovery",
+    quantity: targets.length,
+    userId: ctx.userId,
+    refType: "lead.find_website",
+  });
+  let jobId: string;
+  try {
+    jobId = await enqueue("lead.find_website", { leadIds: targets.map((t) => t.id), usageId }, { companyId: ctx.companyId, createdById: ctx.userId, maxAttempts: 2 });
+  } catch (err) {
+    await refundCredits(usageId, "lead.find_website.enqueue_failed");
+    throw err;
+  }
+  await audit({ companyId: ctx.companyId, userId: ctx.userId, action: "lead.website_discovery.started", metadata: { count: targets.length } });
+  return { jobId, count: targets.length, cost: targets.length * CREDIT_COSTS["lead.discovery"] };
+}
+
+/** İş içinden çağrılır: tek Apify araması ile tüm firmalar sorgulanır, sonuçlar ada göre eşlenir. */
+export async function runWebsiteDiscovery(
+  companyId: string,
+  payload: { leadIds: string[]; usageId?: string; runId?: string },
+  helpers?: { progress?: (pct: number) => Promise<void>; saveRunId?: (runId: string) => Promise<void> },
+) {
+  const db = tenantDb({ companyId });
+  const leads = await db.lead.findMany({ where: { id: { in: payload.leadIds }, website: null }, select: { id: true, companyName: true, city: true } });
+  if (leads.length === 0) return { total: 0, found: 0, notFound: 0, items: [] as WebsiteMatch[] };
+
+  const provider = getWebSearchProvider();
+  const queries = leads.map((l) => websiteQuery(l.companyName, l.city));
+  let runId = payload.runId;
+  if (!runId) {
+    runId = await provider.startRawSearch(queries);
+    await helpers?.saveRunId?.(runId);
+  }
+  await helpers?.progress?.(15);
+
+  let results: Map<string, Array<{ title: string; url: string }>> | null = null;
+  for (let i = 0; i < 60 && !results; i++) {
+    results = await provider.fetchRawResults(runId);
+    if (!results) {
+      await helpers?.progress?.(15 + Math.min(60, i * 2));
+      await new Promise((r) => setTimeout(r, process.env.NODE_ENV === "test" ? 5 : 10_000));
+    }
+  }
+  if (!results) throw new AppError("EXTERNAL_FETCH", "Web araması henüz sonuç üretmedi; iş tekrar denenecek.");
+
+  const items: WebsiteMatch[] = [];
+  for (const [i, lead] of leads.entries()) {
+    const found = pickWebsite(lead.companyName, results.get(queries[i]!) ?? []);
+    if (found.website) {
+      const domain = extractDomain(found.website);
+      // Aynı alan adı başka firmaya kayıtlıysa bağlama (yanlış eşleşme / tekrar kaydı önler)
+      const taken = domain ? await db.lead.findFirst({ where: { domain, id: { not: lead.id } }, select: { id: true } }) : null;
+      if (taken) items.push({ leadId: lead.id, name: lead.companyName, website: null, reason: "Bulunan site başka bir firmaya kayıtlı." });
+      else {
+        await db.lead.update({ where: { id: lead.id }, data: { website: found.website, domain } });
+        items.push({ leadId: lead.id, name: lead.companyName, website: found.website });
+      }
+    } else {
+      items.push({ leadId: lead.id, name: lead.companyName, website: null, reason: found.reason });
+    }
+    await helpers?.progress?.(75 + Math.round(((i + 1) / leads.length) * 20));
+  }
+
+  const found = items.filter((x) => x.website).length;
+  // Bulunamayanların kredisi iade edilir
+  const refund = (payload.leadIds.length - found) * CREDIT_COSTS["lead.discovery"];
+  if (payload.usageId && refund > 0) await refundCredits(payload.usageId, "lead.find_website.unused", refund);
+  return { total: leads.length, found, notFound: leads.length - found, items };
+}
+
+/** Son 24 saatteki site araması (özet / ilerleme) */
+export async function getLastWebsiteDiscovery(ctx: TenantContext) {
+  const job = await tenantDb(ctx).job.findFirst({
+    where: { type: "lead.find_website", createdAt: { gte: new Date(Date.now() - 86_400_000) } },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, status: true, result: true, error: true, finishedAt: true },
+  });
+  if (!job) return null;
+  const r = (job.result ?? {}) as { total?: number; found?: number; notFound?: number; items?: WebsiteMatch[] };
+  return { id: job.id, status: job.status, error: job.error, finishedAt: job.finishedAt, total: r.total ?? 0, found: r.found ?? 0, notFound: r.notFound ?? 0, items: r.items ?? [] };
 }

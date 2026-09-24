@@ -21,6 +21,7 @@ import {
   importLeadsCsv,
   startEmailDiscovery,
   startListImport,
+  startWebsiteDiscovery,
   planPreparation,
   startPreparation,
   startLeadResearch,
@@ -207,6 +208,11 @@ export async function bulkLeadsAction(_: ActionState, fd: FormData): Promise<Act
       case "prepare": {
         const r = await startPreparation(ctx, ids, prepareSteps(fd));
         message = `${r.plan.length} firma hazırlanıyor (${r.credits} kredi ayrıldı; yapılamayan adımın kredisi iade edilir). İlerleme listenin üstünde.`;
+        break;
+      }
+      case "find_website": {
+        const r = await startWebsiteDiscovery(ctx, ids);
+        message = `${r.count} firmanın web sitesi aranıyor (${r.cost} kredi; bulunamayanlar iade edilir).`;
         break;
       }
       case "find_email": {

@@ -20,6 +20,8 @@ export interface JobPayloads {
   "lead.score": { leadIds: string[]; usageId?: string };
   /** Web sitesinden kurumsal e-posta bulma (AI'sız, kredi düşmez) */
   "lead.find_email": { leadIds: string[] };
+  /** Firma adından web sitesi bulma (web araması; bulunamayanın kredisi iade edilir) */
+  "lead.find_website": { leadIds: string[]; usageId?: string; runId?: string };
   /** Liste sayfası / yapıştırılmış metinden firma çıkarma (AI + kaynak metinde doğrulama) */
   /** "Hazırla": seçilen lead'ler için e-posta bul → araştır → puanla (sırayla) */
   "lead.prepare": {

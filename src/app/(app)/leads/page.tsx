@@ -7,7 +7,7 @@ import { env } from "@/server/env";
 import { isLeadSourceConfigured, LEAD_SOURCE_LABELS } from "@/server/providers/lead-source";
 import { isAIConfigured } from "@/server/ai";
 import { LEAD_SOURCE_FILTERS, LEAD_STATUS_LABELS, leadStats, listLeads } from "@/server/services/leads";
-import { getLastEmailDiscovery, getLastListImport, getLastPreparation, listRecentSearches } from "@/server/services/lead-intelligence";
+import { getLastEmailDiscovery, getLastListImport, getLastPreparation, getLastWebsiteDiscovery, listRecentSearches } from "@/server/services/lead-intelligence";
 import { listOpenCampaigns } from "@/server/services/campaigns";
 import { parseLeadFilter } from "@/lib/lead-filter";
 import { BulkBar, SelectPageCheckbox } from "./bulk-bar";
@@ -42,16 +42,18 @@ export default async function LeadsPage({
   const page = Math.max(1, Number(sp.page) || 1);
 
   const canWriteEarly = can(ctx, "lead.write");
-  const [{ rows, total }, stats, searches, emailRun, listRun, prepRun, openCampaigns] = await Promise.all([
+  const [{ rows, total }, stats, searches, emailRun, listRun, prepRun, siteRun, openCampaigns] = await Promise.all([
     listLeads(ctx, { ...filter, take: PAGE_SIZE, skip: (page - 1) * PAGE_SIZE }),
     leadStats(ctx),
     listRecentSearches(ctx, 5),
     getLastEmailDiscovery(ctx),
     getLastListImport(ctx),
     getLastPreparation(ctx),
+    getLastWebsiteDiscovery(ctx),
     canWriteEarly && can(ctx, "campaign.write") ? listOpenCampaigns(ctx) : Promise.resolve([]),
   ]);
   const prepRunning = prepRun && (prepRun.status === "QUEUED" || prepRun.status === "RUNNING");
+  const siteRunning = siteRun && (siteRun.status === "QUEUED" || siteRun.status === "RUNNING");
   const filterParams: Record<string, string | undefined> = {
     q: filter.q,
     status: filter.status,
@@ -216,6 +218,19 @@ export default async function LeadsPage({
           </div>
         )}
         {/* Filtre formunun DIŞINDA olmalı: iç içe <form> geçersizdir, tarayıcı butonu dış formu (filtre) gönderir */}
+        {siteRun && (
+          <div className="border-b border-border px-5 py-3">
+            {siteRunning ? (
+              <JobPoller
+                jobId={siteRun.id}
+                label={`${siteRun.total || ""} firmanın web sitesi aranıyor…`}
+                steps={[[0, "Arama başlatılıyor…"], [15, "Google sonuçları bekleniyor (1-3 dakika)…"], [75, "Firma adıyla eşleştiriliyor…"]]}
+              />
+            ) : (
+              <WebsiteDiscoverySummary run={siteRun} />
+            )}
+          </div>
+        )}
         {emailRun && (
           <div className="border-b border-border px-5 py-3">
             {emailRunning ? (
@@ -484,6 +499,36 @@ function PreparationSummary({ run }: { run: NonNullable<Awaited<ReturnType<typeo
             </span>
           ))}
         </p>
+      )}
+    </div>
+  );
+}
+
+function WebsiteDiscoverySummary({ run }: { run: NonNullable<Awaited<ReturnType<typeof getLastWebsiteDiscovery>>> }) {
+  if (run.status !== "SUCCEEDED") {
+    return <Alert tone="danger">Son site araması tamamlanamadı{run.error ? `: ${run.error}` : "."} Kredi iade edildi.</Alert>;
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-sm font-medium text-text">Son site araması: {run.total} firma</p>
+      <div className="flex flex-wrap gap-2">
+        <Badge tone="success">{run.found} firmada site bulundu</Badge>
+        {run.notFound > 0 && <Badge>{run.notFound} firmada bulunamadı (kredi iade edildi)</Badge>}
+      </div>
+      {run.items.length > 0 && (
+        <details className="rounded-lg border border-border">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-accent-text">Firma firma sonuçları göster ({run.items.length})</summary>
+          <ul className="divide-y divide-border border-t border-border">
+            {run.items.map((it) => (
+              <li key={it.leadId} className="flex flex-col gap-1 px-3 py-2.5 sm:flex-row sm:items-center sm:gap-3">
+                <Link href={`/leads/${it.leadId}`} className="min-w-0 truncate text-sm font-medium text-text hover:text-accent-text sm:w-72">{it.name}</Link>
+                <span className="min-w-0 flex-1 text-xs text-text-2">
+                  {it.website ? <span className="font-medium text-success">{it.website}</span> : it.reason}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
     </div>
   );

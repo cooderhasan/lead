@@ -42,6 +42,7 @@ export function SelectPageCheckbox() {
 
 const OPS: Array<[string, string]> = [
   ["prepare", "Hazırla (e-posta bul → analiz et → puanla)"],
+  ["find_website", "Firma adından web sitesini bul (1 kredi)"],
   ["find_email", "Web sitesinde e-posta bul (ücretsiz)"],
   ["score", "Yalnızca puanla"],
   ["campaign", "Kampanyaya ekle"],

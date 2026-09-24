@@ -9,7 +9,7 @@ const API_BASE = "https://api.apify.com/v2";
 const DEFAULT_ACTOR = "apify~google-search-scraper";
 const RESULTS_PER_PAGE = 10;
 
-interface SerpItem {
+export interface SerpItem {
   searchQuery?: { term?: string };
   organicResults?: Array<{ title?: string; url?: string; description?: string }>;
 }
@@ -27,6 +27,12 @@ const NON_COMPANY_HOSTS = [
   "hurriyet.com.tr", "milliyet.com.tr", "sabah.com.tr", "haberturk.com", "ntv.com.tr", "sozcu.com.tr", "dunya.com", "bloomberght.com", "aa.com.tr",
   "gov.tr", "edu.tr", "bel.tr", "sikayetvar.com", "kariyer.net", "yenibiris.com", "secretcv.com", "indeed.",
 ];
+
+/** Dizin / pazaryeri / sosyal medya gibi firma sitesi olmayan alan adı mı? */
+export function isNonCompanyHost(host: string): boolean {
+  const h = host.toLowerCase().replace(/^www\./, "");
+  return NON_COMPANY_HOSTS.some((x) => h.includes(x));
+}
 
 /** Başlıktan firma adını çıkarır: "Aktif Yay | Basma Yay Üretimi" → "Aktif Yay" (en anlamlı parça) */
 export function companyNameFromTitle(title: string, domain: string): string {
@@ -75,6 +81,31 @@ export class ApifyWebSearchProvider implements LeadSourceProvider {
     // Sonuçların önemli kısmı dizin / haber olup elenir → hedefin ~2 katı sonuç istenir
     const pages = Math.min(3, Math.max(1, Math.ceil((query.limit * 2) / (RESULTS_PER_PAGE * Math.max(1, queries.length)))));
     return { queries: queries.join("\n"), maxPagesPerQuery: pages, countryCode: "tr", languageCode: "tr", mobileResults: false };
+  }
+
+  /** Serbest sorgu listesi (her firma adı bir sorgu). Sonuçlar sorguya göre gruplanır. */
+  async startRawSearch(queries: string[]): Promise<string> {
+    const run = await this.call<{ data: { id: string } }>(`/acts/${this.actorId}/runs`, {
+      method: "POST",
+      body: JSON.stringify({ queries: queries.slice(0, 50).join("\n"), maxPagesPerQuery: 1, countryCode: "tr", languageCode: "tr", mobileResults: false }),
+    });
+    return run.data.id;
+  }
+
+  /** Ham sonuçlar: { sorgu → [{title, url}] }. Çalışma bitmediyse null. */
+  async fetchRawResults(runId: string): Promise<Map<string, Array<{ title: string; url: string }>> | null> {
+    const run = await this.call<{ data: { status: string } }>(`/actor-runs/${runId}`);
+    if (run.data.status === "READY" || run.data.status === "RUNNING") return null;
+    if (run.data.status !== "SUCCEEDED") throw new AppError("EXTERNAL_FETCH", "Web araması tamamlanamadı.");
+    const items = await this.call<SerpItem[]>(`/actor-runs/${runId}/dataset/items?clean=true&format=json`);
+    const map = new Map<string, Array<{ title: string; url: string }>>();
+    for (const item of items) {
+      const term = item.searchQuery?.term ?? "";
+      const list = map.get(term) ?? [];
+      for (const r of item.organicResults ?? []) if (r.title && r.url) list.push({ title: r.title, url: r.url });
+      map.set(term, list);
+    }
+    return map;
   }
 
   async startSearch(query: LeadSearchQuery): Promise<LeadSearchRun> {

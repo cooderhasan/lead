@@ -24,4 +24,27 @@ export function getLeadSourceProvider(kind: LeadSourceKind = "maps"): LeadSource
     : new ApifyLeadSourceProvider(e.APIFY_TOKEN ?? "", e.APIFY_GOOGLE_MAPS_ACTOR);
 }
 
+export interface WebSearchProvider {
+  startRawSearch(queries: string[]): Promise<string>;
+  fetchRawResults(runId: string): Promise<Map<string, Array<{ title: string; url: string }>> | null>;
+}
+
+let webOverride: WebSearchProvider | null = null;
+
+/** Yalnızca testlerde kullanılır. */
+export function __setWebSearchProviderForTests(p: WebSearchProvider | null) {
+  webOverride = p;
+}
+
+export function isWebSearchConfigured(): boolean {
+  return Boolean(webOverride) || Boolean(env().APIFY_TOKEN);
+}
+
+/** Firma adından site bulmak için ham web araması sağlayıcısı */
+export function getWebSearchProvider(): WebSearchProvider {
+  if (webOverride) return webOverride;
+  const e = env();
+  return new ApifyWebSearchProvider(e.APIFY_TOKEN ?? "", e.APIFY_WEB_SEARCH_ACTOR);
+}
+
 export const LEAD_SOURCE_LABELS: Record<LeadSourceKind, string> = { maps: "Google Haritalar", web: "Web araması" };
