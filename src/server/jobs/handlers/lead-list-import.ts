@@ -10,7 +10,7 @@ export const listImportJob: JobHandler<"lead.list_import"> = async (payload, h) 
   if (!h.companyId) throw new PermanentJobError("Şirket bağlamı yok.");
   let res: Awaited<ReturnType<typeof importFromList>>;
   try {
-    res = await importFromList(h.companyId, payload, h.progress);
+    res = await importFromList(h.companyId, payload, h.progress, { jobId: h.jobId, createdById: h.createdById });
   } catch (err) {
     // Sayfa yasak / açılmıyor / okunamıyor → tekrar denemenin anlamı yok
     if (err instanceof FetchBlockedError || (isAppError(err) && err.code === "VALIDATION")) throw new PermanentJobError((err as Error).message);

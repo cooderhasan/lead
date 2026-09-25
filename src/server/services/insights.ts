@@ -31,9 +31,15 @@ export function extractNumbers(text: string): string[] {
 }
 
 /** Veri nesnesindeki tüm sayısal değerler (izin verilen sayı kümesi). */
+/** Tarih / saat metni: içindeki sayılar veri sayılmaz (ör. saat 09:35 iken "%35" doğrulanmış görünmesin) */
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2})?/;
+
 export function numbersIn(data: unknown, acc = new Set<string>()): Set<string> {
   if (typeof data === "number" && Number.isFinite(data)) acc.add(String(data));
-  else if (typeof data === "string") for (const n of extractNumbers(data)) acc.add(n);
+  else if (data instanceof Date) return acc;
+  else if (typeof data === "string") {
+    if (!ISO_DATE.test(data.trim())) for (const n of extractNumbers(data)) acc.add(n);
+  }
   else if (Array.isArray(data)) for (const d of data) numbersIn(d, acc);
   else if (data && typeof data === "object") for (const v of Object.values(data)) numbersIn(v, acc);
   return acc;

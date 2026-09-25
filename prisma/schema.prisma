@@ -436,6 +436,7 @@ model Company {
   opportunities      Opportunity[]
   tasks              Task[]
   callLogs           CallLog[]
+  leadLists          LeadList[]
   followUps          FollowUp[]
   proposals          Proposal[]
   competitors        Competitor[]
@@ -773,10 +774,13 @@ model Lead {
   lastCallAt       DateTime?
   lastCallOutcome  CallOutcome?
   callAttempts     Int          @default(0)
+  /// Firmadan sorumlu ekip üyesi (aramayı / içe aktarmayı yapan kişi; sonradan değiştirilebilir)
+  ownerId          String?
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
   company       Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  lists         LeadListItem[]
   industryRef   Industry?          @relation(fields: [industryId], references: [id], onDelete: SetNull)
   calls         CallLog[]
   contacts      LeadContact[]
@@ -793,6 +797,7 @@ model Lead {
   compliance    ComplianceRecord[]
 
   @@index([companyId, status])
+  @@index([companyId, ownerId])
   @@index([companyId, fitScore])
   @@index([companyId, domain])
   @@index([companyId, normalizedPhone])
@@ -802,6 +807,43 @@ model Lead {
 }
 
 /// Kişisel iletişim bilgisi — şirket genel iletişiminden ayrı veri tipi (KVKK).
+/// Lead listesi: her arama / içe aktarma otomatik bir liste oluşturur; elle de oluşturulabilir.
+model LeadList {
+  id          String       @id @default(cuid())
+  companyId   String
+  name        String
+  kind        LeadListKind @default(MANUAL)
+  createdById String?
+  /// Listeyi oluşturan iş (arama / içe aktarma) — tekrar oluşturmayı önler
+  jobId       String?
+  createdAt   DateTime     @default(now())
+
+  company Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  items   LeadListItem[]
+
+  @@unique([companyId, jobId])
+  @@index([companyId, createdAt])
+}
+
+model LeadListItem {
+  listId    String
+  leadId    String
+  companyId String
+  addedAt   DateTime @default(now())
+
+  list LeadList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  lead Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@id([listId, leadId])
+  @@index([companyId, leadId])
+}
+
+enum LeadListKind {
+  SEARCH
+  IMPORT
+  MANUAL
+}
+
 model LeadContact {
   id                 String             @id @default(cuid())
   companyId          String

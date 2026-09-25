@@ -4,7 +4,7 @@ import { useActionState, useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Loader2 } from "lucide-react";
 import { bulkLeadsAction, estimatePrepareAction } from "@/app/actions/leads";
-import { Alert, Button, Select } from "@/components/ui";
+import { Alert, Button, Input, Select } from "@/components/ui";
 import type { ActionState } from "@/lib/action-state";
 import { cn } from "@/lib/cn";
 
@@ -46,6 +46,9 @@ const OPS: Array<[string, string]> = [
   ["find_email", "Web sitesinde e-posta bul (ücretsiz)"],
   ["score", "Yalnızca puanla"],
   ["campaign", "Kampanyaya ekle"],
+  ["assign", "Sorumlu ata"],
+  ["list_add", "Listeye ekle"],
+  ["list_remove", "Listeden çıkar"],
   ["status", "Durumu değiştir"],
   ["delete", "Sil"],
 ];
@@ -69,11 +72,15 @@ export function BulkBar({
   filter,
   campaigns,
   statuses,
+  members,
+  lists,
 }: {
   matching: number;
   filter: Record<string, string | undefined>;
   campaigns: Array<{ id: string; name: string }>;
   statuses: Array<[string, string]>;
+  members: Array<{ id: string; name: string }>;
+  lists: Array<{ id: string; name: string }>;
 }) {
   const [state, formAction] = useActionState<ActionState, FormData>(bulkLeadsAction, {});
   const [selected, setSelected] = useState(0);
@@ -81,6 +88,7 @@ export function BulkBar({
   const [allMode, setAllMode] = useState(false);
   const [op, setOp] = useState("prepare");
   const [steps, setSteps] = useState({ p_email: true, p_research: true, p_score: true });
+  const [listChoice, setListChoice] = useState("");
   const formRef = useRef<HTMLFormElement>(null);
   const confirmed = useRef(false);
 
@@ -200,6 +208,35 @@ export function BulkBar({
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
               </Select>
+            )}
+            {op === "assign" && (
+              <Select name="ownerId" defaultValue="" aria-label="Sorumlu" className="h-9 w-auto min-w-48 text-sm">
+                <option value="" disabled>Kişi seçin…</option>
+                {members.map((m) => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+                <option value="none">— Sorumluyu kaldır</option>
+              </Select>
+            )}
+            {(op === "list_add" || op === "list_remove") && (
+              <>
+                <Select
+                  name="listId"
+                  value={listChoice}
+                  onChange={(e) => setListChoice(e.target.value)}
+                  aria-label="Liste"
+                  className="h-9 w-auto min-w-48 text-sm"
+                >
+                  <option value="" disabled>{lists.length ? "Liste seçin…" : "Liste yok"}</option>
+                  {lists.map((l) => (
+                    <option key={l.id} value={l.id}>{l.name}</option>
+                  ))}
+                  {op === "list_add" && <option value="__new">+ Yeni liste oluştur</option>}
+                </Select>
+                {op === "list_add" && listChoice === "__new" && (
+                  <Input name="listName" required placeholder="Yeni liste adı" maxLength={120} className="h-9 w-auto min-w-44 text-sm" />
+                )}
+              </>
             )}
             {op === "status" && (
               <Select name="status" defaultValue="" aria-label="Yeni durum" className="h-9 w-auto min-w-40 text-sm">

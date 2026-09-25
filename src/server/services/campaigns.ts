@@ -683,6 +683,15 @@ export async function addLeadsToCampaign(ctx: TenantContext, campaignId: string,
     where: { id: { in: [...new Set(leadIds)] }, suppressed: false, status: { notIn: [...EXCLUDED_LEAD_STATUSES] } },
     select: { id: true, fitScore: true },
   });
+  // Başka bir açık kampanyada olan firmalar: ekip içi çakışma uyarısı (alıcıyı sıklık kuralları korur)
+  const inOther = new Set(
+    (
+      await db.campaignLead.findMany({
+        where: { leadId: { in: leads.map((l) => l.id) }, campaignId: { not: campaignId }, campaign: { status: { in: CAMPAIGN_OPEN_STATUSES } } },
+        select: { leadId: true },
+      })
+    ).map((c) => c.leadId),
+  );
   let added = 0;
   let noEmail = 0;
   for (const l of leads) {
@@ -694,6 +703,7 @@ export async function addLeadsToCampaign(ctx: TenantContext, campaignId: string,
     added++;
   }
   const skipped = leadIds.length - added;
+  const alsoInOther = leads.filter((l) => inOther.has(l.id) && !already.has(l.id)).length;
   await audit({ companyId: ctx.companyId, userId: ctx.userId, action: "campaign.leads_added", entityType: "Campaign", entityId: campaignId, metadata: { added, skipped } });
-  return { added, skipped, noEmail, campaignName: campaign.name };
+  return { added, skipped, noEmail, alsoInOther, campaignName: campaign.name };
 }

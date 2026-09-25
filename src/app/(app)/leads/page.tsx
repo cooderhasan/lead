@@ -6,10 +6,11 @@ import { can } from "@/server/tenancy/permissions";
 import { env } from "@/server/env";
 import { isLeadSourceConfigured, LEAD_SOURCE_LABELS } from "@/server/providers/lead-source";
 import { isAIConfigured } from "@/server/ai";
-import { LEAD_SOURCE_FILTERS, LEAD_STATUS_LABELS, leadStats, listLeads } from "@/server/services/leads";
+import { LEAD_SORTS, LEAD_SOURCE_FILTERS, LEAD_STATUS_LABELS, leadStats, listLeadLists, listLeads } from "@/server/services/leads";
+import { listMembers } from "@/server/services/members";
 import { getLastEmailDiscovery, getLastListImport, getLastPreparation, getLastWebsiteDiscovery, listRecentSearches } from "@/server/services/lead-intelligence";
 import { listOpenCampaigns } from "@/server/services/campaigns";
-import { parseLeadFilter } from "@/lib/lead-filter";
+import { LEAD_PAGE_SIZES, parseLeadFilter } from "@/lib/lead-filter";
 import { BulkBar, SelectPageCheckbox } from "./bulk-bar";
 import { JobPoller } from "@/components/job-poller";
 import { Alert, Badge, Card, CardBody, CardHeader, EmptyState, Input, LinkButton, PageHeader, Select, StatCard, buttonClass } from "@/components/ui";
@@ -33,23 +34,40 @@ const SOURCE_LABELS: Record<string, string> = {
 export default async function LeadsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; status?: string; min?: string; page?: string; source?: string; email?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    status?: string;
+    min?: string;
+    page?: string;
+    source?: string;
+    email?: string;
+    owner?: string;
+    list?: string;
+    campaign?: string;
+    sort?: string;
+    per?: string;
+  }>;
 }) {
   const ctx = await requireTenantPage();
   const sp = await searchParams;
-  const filter = parseLeadFilter((k) => sp[k as keyof typeof sp]);
+  const parsed = parseLeadFilter((k) => sp[k as keyof typeof sp]);
+  // "me" sekmesi oturumdaki kullanıcıya çevrilir
+  const filter = { ...parsed, owner: parsed.owner === "me" ? ctx.userId : parsed.owner };
   const { status, minScore } = filter;
+  const pageSize = parsed.per ?? PAGE_SIZE;
   const page = Math.max(1, Number(sp.page) || 1);
 
   const canWriteEarly = can(ctx, "lead.write");
-  const [{ rows, total }, stats, searches, emailRun, listRun, prepRun, siteRun, openCampaigns] = await Promise.all([
-    listLeads(ctx, { ...filter, take: PAGE_SIZE, skip: (page - 1) * PAGE_SIZE }),
+  const [{ rows, total }, stats, searches, emailRun, listRun, prepRun, siteRun, lists, members, openCampaigns] = await Promise.all([
+    listLeads(ctx, { ...filter, take: pageSize, skip: (page - 1) * pageSize }),
     leadStats(ctx),
     listRecentSearches(ctx, 5),
     getLastEmailDiscovery(ctx),
     getLastListImport(ctx),
     getLastPreparation(ctx),
     getLastWebsiteDiscovery(ctx),
+    listLeadLists(ctx),
+    can(ctx, "member.read") ? listMembers(ctx) : Promise.resolve([]),
     canWriteEarly && can(ctx, "campaign.write") ? listOpenCampaigns(ctx) : Promise.resolve([]),
   ]);
   const prepRunning = prepRun && (prepRun.status === "QUEUED" || prepRun.status === "RUNNING");
@@ -60,6 +78,20 @@ export default async function LeadsPage({
     min: filter.minScore !== undefined ? String(filter.minScore) : undefined,
     source: filter.source,
     email: filter.email,
+    owner: filter.owner,
+    list: filter.listId,
+    campaign: filter.campaign,
+  };
+  // Sorumlu adları (tabloda baş harf rozeti ve seçiciler için)
+  const memberNames = new Map(members.map((m) => [m.user.id, m.user.name || m.user.email]));
+  const ownerTab = parsed.owner === "me" ? "me" : parsed.owner === "none" ? "none" : parsed.owner ? "other" : "all";
+  const tabHref = (owner: string | null) => {
+    const u = new URLSearchParams();
+    for (const [k, v] of Object.entries({ ...filterParams, owner: undefined })) if (v) u.set(k === "listId" ? "list" : k, v);
+    if (parsed.sort) u.set("sort", parsed.sort);
+    if (parsed.per) u.set("per", String(parsed.per));
+    if (owner) u.set("owner", owner);
+    return `/leads?${u.toString()}`;
   };
   const listRunning = listRun && (listRun.status === "QUEUED" || listRun.status === "RUNNING");
   const emailRunning = emailRun && (emailRun.status === "QUEUED" || emailRun.status === "RUNNING");
@@ -69,7 +101,7 @@ export default async function LeadsPage({
   const running = searches.find((s) => s.status === "QUEUED" || s.status === "RUNNING");
   const unscored = rows.filter((r) => r.fitScore === null).map((r) => r.id);
   const missingEmail = rows.filter((r) => r.website && !r.genericEmail).map((r) => r.id);
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const pages = Math.max(1, Math.ceil(total / pageSize));
   const qs = (p: number) => {
     const u = new URLSearchParams();
     if (sp.q) u.set("q", sp.q);
@@ -77,6 +109,11 @@ export default async function LeadsPage({
     if (minScore !== undefined) u.set("min", String(minScore));
     if (filter.source) u.set("source", filter.source);
     if (filter.email) u.set("email", filter.email);
+    if (parsed.owner) u.set("owner", parsed.owner);
+    if (filter.listId) u.set("list", filter.listId);
+    if (filter.campaign) u.set("campaign", filter.campaign);
+    if (parsed.sort) u.set("sort", parsed.sort);
+    if (parsed.per) u.set("per", String(parsed.per));
     u.set("page", String(p));
     return `/leads?${u.toString()}`;
   };
@@ -170,7 +207,32 @@ export default async function LeadsPage({
       )}
 
       <Card>
+        <div className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-3">
+          {([["me", "Benim firmalarım"], ["none", "Atanmamış"], [null, "Tümü"]] as const).map(([v, label]) => (
+            <Link
+              key={label}
+              href={tabHref(v)}
+              className={cn(
+                "rounded-full border px-3 py-1.5 text-sm",
+                (v ?? "all") === ownerTab || (v === null && ownerTab === "all")
+                  ? "border-accent bg-accent-soft text-accent-text"
+                  : "border-border text-text-2 hover:bg-surface-2",
+              )}
+            >
+              {label}
+            </Link>
+          ))}
+          {ownerTab === "other" && (
+            <Badge tone="accent">{memberNames.get(parsed.owner ?? "") ?? "Kişi"} firmaları</Badge>
+          )}
+          {filter.listId && (
+            <Badge tone="accent">
+              Liste: {lists.find((l) => l.id === filter.listId)?.name ?? "seçili"}
+            </Badge>
+          )}
+        </div>
         <form className="flex flex-wrap items-end gap-3 border-b border-border px-5 py-4" action="/leads">
+          {parsed.owner && <input type="hidden" name="owner" value={parsed.owner} />}
           <Input name="q" defaultValue={sp.q ?? ""} placeholder="Firma, alan adı, şehir, sektör…" className="min-w-48 flex-1" aria-label="Ara" />
           <Select name="status" defaultValue={status ?? ""} className="w-44" aria-label="Durum">
             <option value="">Tüm durumlar</option>
@@ -194,6 +256,27 @@ export default async function LeadsPage({
             <option value="yes">E-postası olan</option>
             <option value="no">E-postası olmayan</option>
           </Select>
+          <Select name="list" defaultValue={filter.listId ?? ""} className="w-52" aria-label="Liste">
+            <option value="">Tüm listeler</option>
+            {lists.map((l) => (
+              <option key={l.id} value={l.id}>{l.name} ({l.count})</option>
+            ))}
+          </Select>
+          <Select name="campaign" defaultValue={filter.campaign ?? ""} className="w-48" aria-label="Kampanya">
+            <option value="">Kampanya: hepsi</option>
+            <option value="out">Kampanyada olmayanlar</option>
+            <option value="in">Kampanyada olanlar</option>
+          </Select>
+          <Select name="sort" defaultValue={parsed.sort ?? "score"} className="w-44" aria-label="Sıralama">
+            {Object.entries(LEAD_SORTS).map(([k, v]) => (
+              <option key={k} value={k}>{v.label}</option>
+            ))}
+          </Select>
+          <Select name="per" defaultValue={String(pageSize)} className="w-32" aria-label="Sayfa boyutu">
+            {LEAD_PAGE_SIZES.map((n) => (
+              <option key={n} value={n}>{n} / sayfa</option>
+            ))}
+          </Select>
           <button type="submit" className={buttonClass("secondary")}>Filtrele</button>
         </form>
         {canWrite && (
@@ -201,6 +284,8 @@ export default async function LeadsPage({
             matching={total}
             filter={filterParams}
             campaigns={openCampaigns}
+            members={members.map((m) => ({ id: m.user.id, name: m.user.name || m.user.email }))}
+            lists={lists.map((l) => ({ id: l.id, name: l.name }))}
             statuses={LEAD_STATUSES.map((s) => [s, LEAD_STATUS_LABELS[s]] as [string, string])}
           />
         )}
@@ -270,6 +355,7 @@ export default async function LeadsPage({
                   <th className="px-3 py-2.5">Konum</th>
                   <th className="hidden px-3 py-2.5 lg:table-cell">Sektör</th>
                   <th className="px-3 py-2.5">Durum</th>
+                  <th className="hidden px-3 py-2.5 lg:table-cell">Sorumlu</th>
                   <th className="hidden px-5 py-2.5 xl:table-cell">Kaynak</th>
                   {canWrite && <th className="w-12 px-3 py-2.5"><span className="sr-only">İşlemler</span></th>}
                 </tr>
@@ -312,7 +398,28 @@ export default async function LeadsPage({
                     </td>
                     <td className="px-3 py-3 text-text-2">{[l.district, l.city].filter(Boolean).join(", ") || "—"}</td>
                     <td className="hidden max-w-52 truncate px-3 py-3 text-text-2 lg:table-cell">{l.industry ?? "—"}</td>
-                    <td className="px-3 py-3"><Badge>{LEAD_STATUS_LABELS[l.status]}</Badge></td>
+                    <td className="px-3 py-3">
+                      <div className="flex flex-col items-start gap-1">
+                        <Badge>{LEAD_STATUS_LABELS[l.status]}</Badge>
+                        {l.campaignLeads.length > 0 && (
+                          <Link href={`/campaigns/${l.campaignLeads[0]!.campaign.id}`} className="max-w-40 truncate text-[11px] text-accent-text hover:underline">
+                            Kampanya: {l.campaignLeads[0]!.campaign.name}
+                          </Link>
+                        )}
+                      </div>
+                    </td>
+                    <td className="hidden px-3 py-3 lg:table-cell">
+                      {l.ownerId ? (
+                        <span
+                          title={memberNames.get(l.ownerId) ?? "Ekip üyesi"}
+                          className="inline-grid size-7 place-items-center rounded-full bg-surface-2 text-[11px] font-semibold text-text-2 ring-1 ring-border"
+                        >
+                          {initials(memberNames.get(l.ownerId) ?? "?")}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-text-3">—</span>
+                      )}
+                    </td>
                     <td className="hidden px-5 py-3 xl:table-cell">
                       <div className="flex flex-wrap gap-1">
                         {[...new Set(l.sources.map((s) => s.provider))].map((p) => (
@@ -531,5 +638,17 @@ function WebsiteDiscoverySummary({ run }: { run: NonNullable<Awaited<ReturnType<
         </details>
       )}
     </div>
+  );
+}
+
+/** Ad → baş harfler (sorumlu rozeti) */
+function initials(name: string): string {
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0]!.toLocaleUpperCase("tr"))
+      .join("") || "?"
   );
 }

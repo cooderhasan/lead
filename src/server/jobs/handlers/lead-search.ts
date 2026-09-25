@@ -2,7 +2,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import { rawDb } from "@/server/db";
 import { getLeadSourceProvider } from "@/server/providers/lead-source";
-import { saveDiscoveredLeads } from "@/server/services/leads";
+import { ensureJobList, saveDiscoveredLeads } from "@/server/services/leads";
 import { refundCredits, CREDIT_COSTS } from "@/server/usage/credits";
 import { audit } from "@/server/audit/audit";
 import { PermanentJobError, type JobHandler, type JobPayloads } from "../types";
@@ -33,7 +33,14 @@ export const searchLeadsJob: JobHandler<"lead.search"> = async (payload, h) => {
     if (res.status === "SUCCEEDED") {
       await h.progress(80);
       const leads = res.leads.slice(0, payload.reserved);
-      const saved = await saveDiscoveredLeads(h.companyId, leads, { provider: provider.name, runId });
+      // Her arama kendi listesini oluşturur: sonuçlar karışmasın, sonradan tek tıkla süzülsün
+      const listId = await ensureJobList(h.companyId, {
+        jobId: h.jobId,
+        name: (payload.prompt || payload.interpretation || "Arama").slice(0, 80),
+        kind: "SEARCH",
+        createdById: h.createdById,
+      });
+      const saved = await saveDiscoveredLeads(h.companyId, leads, { provider: provider.name, runId, listId, ownerId: h.createdById });
 
       // Yalnızca yeni eklenen lead'ler ücretlendirilir; mevcut kayıtla birleşenler ücretsiz
       const unusedCredits = (payload.reserved - saved.created) * CREDIT_COSTS["lead.discovery"];

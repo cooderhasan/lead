@@ -12,6 +12,12 @@ describe("sayı doğrulama", () => {
     expect(extractNumbers("Yanıt oranı %12,5 ve 1.250 ileti, 3 kampanya")).toEqual(["12.5", "1250", "3"]);
   });
 
+  it("tarih metinlerindeki sayılar veri sayılmaz (saat 09:35 iken %35 uydurma kalır)", () => {
+    const allowed = numbersIn({ since: "2026-08-26T09:35:12.345Z", generatedAt: new Date("2026-08-26T09:35:12Z"), sent: 20 });
+    expect(unverifiedNumbers("Sektör ortalaması %35", allowed)).toEqual(["35"]);
+    expect(unverifiedNumbers("20 ileti gönderildi", allowed)).toEqual([]);
+  });
+
   it("veride olmayan her sayıyı yakalar — küçük sayılar dahil", () => {
     const allowed = numbersIn({ sent: 40, rate: 12.5, won: 2 });
     expect(unverifiedNumbers("40 iletiden %12,5 yanıt, 2 satış", allowed)).toEqual([]);

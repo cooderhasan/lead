@@ -47,9 +47,26 @@ export interface LeadFilter {
   source?: LeadSourceFilter;
   /** Kurumsal e-postası olan / olmayan */
   email?: "yes" | "no";
+  /** Sorumlu: kullanıcı kimliği veya "none" (atanmamış) */
+  owner?: string;
+  /** Yalnızca bu listedeki firmalar */
+  listId?: string;
+  /** Açık kampanyada olan / olmayan */
+  campaign?: "in" | "out";
+  sort?: LeadSort;
   take?: number;
   skip?: number;
 }
+
+export const LEAD_SORTS = {
+  score: { label: "Puan (yüksekten)", order: [{ fitScore: { sort: "desc", nulls: "last" } }, { discoveredAt: "desc" }] },
+  new: { label: "En yeni", order: [{ discoveredAt: "desc" }] },
+  name: { label: "Firma adı (A-Z)", order: [{ companyName: "asc" }] },
+} satisfies Record<string, { label: string; order: Prisma.LeadOrderByWithRelationInput[] }>;
+export type LeadSort = keyof typeof LEAD_SORTS;
+
+/** Açık kampanya aşamaları (lead "kampanyada mı" kontrolü) */
+const OPEN_CAMPAIGN_STATUSES = ["DRAFT", "STRATEGY_REVIEW", "READY", "PAUSED", "RUNNING"] as const;
 
 export const LEAD_SOURCE_FILTERS = {
   maps: { label: "Google Haritalar", providers: ["apify"] },
@@ -65,6 +82,12 @@ export function buildWhere(filter: LeadFilter): Prisma.LeadWhereInput {
   if (filter.source) where.sources = { some: { provider: { in: [...LEAD_SOURCE_FILTERS[filter.source].providers] } } };
   if (filter.email === "yes") where.genericEmail = { not: null };
   if (filter.email === "no") where.genericEmail = null;
+  if (filter.owner) where.ownerId = filter.owner === "none" ? null : filter.owner;
+  if (filter.listId) where.lists = { some: { listId: filter.listId } };
+  if (filter.campaign) {
+    const inOpen = { campaign: { status: { in: [...OPEN_CAMPAIGN_STATUSES] } } };
+    where.campaignLeads = filter.campaign === "in" ? { some: inOpen } : { none: inOpen };
+  }
   if (filter.status) where.status = filter.status;
   if (filter.city) where.city = { equals: filter.city, mode: "insensitive" };
   if (typeof filter.minScore === "number") where.fitScore = { gte: filter.minScore };
@@ -89,12 +112,17 @@ export async function listLeads(ctx: TenantContext, filter: LeadFilter = {}) {
   const [rows, total] = await Promise.all([
     db.lead.findMany({
       where,
-      orderBy: [{ fitScore: { sort: "desc", nulls: "last" } }, { discoveredAt: "desc" }],
+      orderBy: LEAD_SORTS[filter.sort ?? "score"].order,
       take: Math.min(filter.take ?? 50, 200),
       skip: filter.skip ?? 0,
       include: {
         _count: { select: { contacts: true, signals: true } },
         sources: { select: { type: true, provider: true }, take: 3 },
+        campaignLeads: {
+          where: { campaign: { status: { in: [...OPEN_CAMPAIGN_STATUSES] } } },
+          select: { campaign: { select: { id: true, name: true, createdById: true } } },
+          take: 2,
+        },
       },
     }),
     db.lead.count({ where }),
@@ -135,6 +163,76 @@ export async function bulkDeleteLeads(ctx: TenantContext, ids: string[]) {
   const res = await tenantDb(ctx).lead.deleteMany({ where: { id: { in: ids } } });
   await audit({ companyId: ctx.companyId, userId: ctx.userId, action: "lead.bulk_deleted", metadata: { count: res.count } });
   return res.count;
+}
+
+/** Toplu sorumlu atama (null = atanmamış). Sorumlu, şirketin üyesi olmalı. */
+export async function bulkAssignOwner(ctx: TenantContext, ids: string[], ownerId: string | null) {
+  assertCan(ctx, "lead.write");
+  const db = tenantDb(ctx);
+  if (ownerId) {
+    const member = await db.companyMember.findFirst({ where: { userId: ownerId }, select: { id: true } });
+    if (!member) throw new AppError("VALIDATION", "Seçilen kişi bu şirketin ekibinde değil.");
+  }
+  const res = await db.lead.updateMany({ where: { id: { in: ids } }, data: { ownerId } });
+  await audit({ companyId: ctx.companyId, userId: ctx.userId, action: "lead.owner_assigned", metadata: { count: res.count, ownerId } });
+  return res.count;
+}
+
+// ── Listeler (her arama / içe aktarma bir liste) ───────────────────────
+
+export async function listLeadLists(ctx: TenantContext, take = 100) {
+  assertCan(ctx, "lead.read");
+  const lists = await tenantDb(ctx).leadList.findMany({
+    orderBy: { createdAt: "desc" },
+    take,
+    select: { id: true, name: true, kind: true, createdById: true, createdAt: true, _count: { select: { items: true } } },
+  });
+  return lists.map((l) => ({ ...l, count: l._count.items }));
+}
+
+export async function createLeadList(ctx: TenantContext, name: string, leadIds: string[] = []) {
+  assertCan(ctx, "lead.write");
+  const trimmed = name.trim().slice(0, 120);
+  if (trimmed.length < 2) throw new AppError("VALIDATION", "Liste adı girin.", { name: "En az 2 karakter" });
+  const list = await tenantDb(ctx).leadList.create({ data: { companyId: ctx.companyId, name: trimmed, kind: "MANUAL", createdById: ctx.userId } });
+  if (leadIds.length) await addLeadsToList(ctx, list.id, leadIds);
+  return list;
+}
+
+export async function addLeadsToList(ctx: TenantContext, listId: string, leadIds: string[]) {
+  assertCan(ctx, "lead.write");
+  const db = tenantDb(ctx);
+  const list = await db.leadList.findUnique({ where: { id: listId }, select: { id: true, name: true } });
+  if (!list) throw new AppError("NOT_FOUND", "Liste bulunamadı.");
+  const owned = await db.lead.findMany({ where: { id: { in: ids(leadIds) } }, select: { id: true } });
+  const res = await db.leadListItem.createMany({
+    data: owned.map((l) => ({ listId, leadId: l.id, companyId: ctx.companyId })),
+    skipDuplicates: true,
+  });
+  return { added: res.count, name: list.name };
+}
+
+export async function removeLeadsFromList(ctx: TenantContext, listId: string, leadIds: string[]) {
+  assertCan(ctx, "lead.write");
+  const db = tenantDb(ctx);
+  const res = await db.leadListItem.deleteMany({ where: { listId, leadId: { in: ids(leadIds) } } });
+  return res.count;
+}
+
+const ids = (v: string[]) => [...new Set(v)].slice(0, BULK_MAX);
+
+/**
+ * Arama / içe aktarma işinin listesini oluşturur (aynı iş için tekrar çağrılırsa mevcut liste döner).
+ * İş içinden çağrılır; ctx yoktur.
+ */
+export async function ensureJobList(companyId: string, input: { jobId: string; name: string; kind: "SEARCH" | "IMPORT"; createdById?: string | null }) {
+  const db = tenantDb({ companyId });
+  const existing = await db.leadList.findFirst({ where: { jobId: input.jobId }, select: { id: true } });
+  if (existing) return existing.id;
+  const list = await db.leadList.create({
+    data: { companyId, jobId: input.jobId, name: input.name.trim().slice(0, 120) || "Liste", kind: input.kind, createdById: input.createdById ?? null },
+  });
+  return list.id;
 }
 
 export async function leadStats(ctx: TenantContext) {
@@ -296,7 +394,7 @@ export interface SaveLeadsResult {
 export async function saveDiscoveredLeads(
   companyId: string,
   raws: RawLead[],
-  opts: { provider: string; runId?: string },
+  opts: { provider: string; runId?: string; ownerId?: string | null; listId?: string },
 ): Promise<SaveLeadsResult> {
   const db = tenantDb({ companyId });
   const result: SaveLeadsResult = { created: 0, merged: 0, skipped: 0, leadIds: [] };
@@ -318,7 +416,8 @@ export async function saveDiscoveredLeads(
       leadId = existing.id;
       result.merged++;
     } else {
-      const created = await db.lead.create({ data: { ...data, companyId, status: "NEW" } });
+      // Sorumlu yalnızca yeni kayıtta atanır; mevcut firmanın sorumlusu değişmez
+      const created = await db.lead.create({ data: { ...data, companyId, status: "NEW", ownerId: opts.ownerId ?? null } });
       leadId = created.id;
       result.created++;
     }
@@ -343,6 +442,14 @@ export async function saveDiscoveredLeads(
     }
 
     await saveContacts(db, companyId, leadId, raw);
+  }
+
+  // Bu arama / içe aktarmanın listesi: hem yeni hem birleşen firmalar listeye girer
+  if (opts.listId && result.leadIds.length) {
+    await db.leadListItem.createMany({
+      data: result.leadIds.map((leadId) => ({ listId: opts.listId!, leadId, companyId })),
+      skipDuplicates: true,
+    });
   }
 
   await audit({
@@ -399,7 +506,7 @@ async function saveContacts(db: TenantDb, companyId: string, leadId: string, raw
 /** Elle lead ekleme — dedupe aynı kurallarla çalışır. */
 export async function createManualLead(ctx: TenantContext, raw: RawLead) {
   assertCan(ctx, "lead.write");
-  const res = await saveDiscoveredLeads(ctx.companyId, [raw], { provider: "manual" });
+  const res = await saveDiscoveredLeads(ctx.companyId, [raw], { provider: "manual", ownerId: ctx.userId });
   const leadId = res.leadIds[0];
   if (!leadId) throw new AppError("VALIDATION", "Lead kaydedilemedi: firma adı gerekli.");
   await audit({

@@ -27,7 +27,7 @@ import { consumeCredits, CREDIT_COSTS, refundCredits } from "@/server/usage/cred
 import { audit } from "@/server/audit/audit";
 import { buildVerifiedCompanyContext } from "./facts";
 import { evidenceFound, normalizeForMatch, valueFound } from "./evidence";
-import { saveDiscoveredLeads } from "./leads";
+import { createLeadList, ensureJobList, saveDiscoveredLeads } from "./leads";
 import { AppError } from "@/lib/errors";
 import { computeReachability, finalizeScore } from "@/lib/lead-scoring";
 import { extractDomain, isCompanyEmail, isGenericEmail, nameSimilarity, normalizeEmail, normalizePhone, pickCompanyEmail } from "@/lib/lead-normalize";
@@ -209,7 +209,8 @@ export async function importLeadsCsv(ctx: TenantContext, text: string) {
       "CSV'de firma adı sütunu bulunamadı. İlk satırda 'Firma' (veya 'Firma Adı', 'Company') başlığı olmalı.",
     );
   }
-  const result = await saveDiscoveredLeads(ctx.companyId, parsed.leads, { provider: "csv" });
+  const list = await createLeadList(ctx, `CSV · ${new Date().toLocaleDateString("tr-TR", { day: "numeric", month: "short", timeZone: "Europe/Istanbul" })}`);
+  const result = await saveDiscoveredLeads(ctx.companyId, parsed.leads, { provider: "csv", listId: list.id, ownerId: ctx.userId });
   await audit({
     companyId: ctx.companyId,
     userId: ctx.userId,
@@ -770,6 +771,20 @@ export async function startListImport(ctx: TenantContext, input: { url?: string 
   return { jobId };
 }
 
+/** Liste adı: "dosb.com.tr · kimya · 25 Eyl" gibi okunur bir ad */
+function listName(url: string | null | undefined, filter: string[]): string {
+  let base = "Yapıştırılan liste";
+  if (url) {
+    try {
+      base = new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`).hostname.replace(/^www\./, "");
+    } catch {
+      /* geçersiz adres → varsayılan ad */
+    }
+  }
+  const date = new Date().toLocaleDateString("tr-TR", { day: "numeric", month: "short", timeZone: "Europe/Istanbul" });
+  return [base, filter.slice(0, 2).join(", "), date].filter(Boolean).join(" · ");
+}
+
 /** Metni satır sınırlarından parçalara böler (AI çıktı sınırı için) */
 function chunkLines(text: string, size: number, max: number): string[] {
   const out: string[] = [];
@@ -835,6 +850,7 @@ export async function importFromList(
   companyId: string,
   payload: { url?: string | null; text?: string | null; filter?: string[] },
   progress?: (pct: number) => Promise<void>,
+  list?: { jobId: string; createdById?: string | null },
 ) {
   const filter = payload.filter ?? [];
   let text = payload.text ?? "";
@@ -849,7 +865,8 @@ export async function importFromList(
       await progress?.(50);
       const matching = applyListFilter(mapped.leads, filter);
       const leads = matching.slice(0, STRUCTURED_MAX);
-      const saved = await saveDiscoveredLeads(companyId, leads, { provider: "directory" });
+      const listId = list ? await ensureJobList(companyId, { jobId: list.jobId, name: listName(payload.url, filter), kind: "IMPORT", createdById: list.createdById }) : undefined;
+      const saved = await saveDiscoveredLeads(companyId, leads, { provider: "directory", listId, ownerId: list?.createdById ?? null });
       return {
         sourceUrl,
         structured: true,
@@ -884,7 +901,8 @@ export async function importFromList(
   const verified = verifyListCompanies(extracted, text, sourceUrl);
   const { dropped } = verified;
   const leads = applyListFilter(verified.leads, filter);
-  const saved = leads.length ? await saveDiscoveredLeads(companyId, leads, { provider: "directory" }) : { created: 0, merged: 0 };
+  const listId2 = list && leads.length ? await ensureJobList(companyId, { jobId: list.jobId, name: listName(payload.url, filter), kind: "IMPORT", createdById: list.createdById }) : undefined;
+  const saved = leads.length ? await saveDiscoveredLeads(companyId, leads, { provider: "directory", listId: listId2, ownerId: list?.createdById ?? null }) : { created: 0, merged: 0 };
   return {
     sourceUrl,
     structured: false,

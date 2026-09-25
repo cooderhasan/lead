@@ -5,8 +5,12 @@ import { redirect } from "next/navigation";
 import { requireTenant } from "@/server/tenancy/context";
 import { parseForm, safeAction } from "@/server/actions/safe-action";
 import {
+  addLeadsToList,
+  bulkAssignOwner,
   bulkDeleteLeads,
   bulkUpdateLeadStatus,
+  createLeadList,
+  removeLeadsFromList,
   createManualLead,
   deleteLead,
   resolveLeadSelection,
@@ -229,8 +233,31 @@ export async function bulkLeadsAction(_: ActionState, fd: FormData): Promise<Act
         const campaignId = String(fd.get("campaignId") ?? "");
         if (!campaignId) throw new AppError("VALIDATION", "Kampanya seçin.");
         const r = await addLeadsToCampaign(ctx, campaignId, ids);
-        message = `"${r.campaignName}" kampanyasına ${r.added} firma eklendi${r.skipped ? `, ${r.skipped} atlandı (zaten ekli / engelli / kapanmış)` : ""}${r.noEmail ? ` · ${r.noEmail} firmanın e-postası yok, gönderilemez` : ""}. Kampanya sayfasında "Mesajları üret" ile devam edin.`;
+        message = `"${r.campaignName}" kampanyasına ${r.added} firma eklendi${r.skipped ? `, ${r.skipped} atlandı (zaten ekli / engelli / kapanmış)` : ""}${r.noEmail ? ` · ${r.noEmail} firmanın e-postası yok, gönderilemez` : ""}${r.alsoInOther ? ` · DİKKAT: ${r.alsoInOther} firma başka bir açık kampanyada da var` : ""}. Kampanya sayfasında "Mesajları üret" ile devam edin.`;
         revalidatePath(`/campaigns/${campaignId}`);
+        break;
+      }
+      case "assign": {
+        const raw = String(fd.get("ownerId") ?? "");
+        if (!raw) throw new AppError("VALIDATION", "Sorumlu seçin.");
+        const n = await bulkAssignOwner(ctx, ids, raw === "none" ? null : raw);
+        message = raw === "none" ? `${n} firmanın sorumlusu kaldırıldı.` : `${n} firma seçilen kişiye atandı.`;
+        break;
+      }
+      case "list_add": {
+        const listId = String(fd.get("listId") ?? "");
+        const newName = String(fd.get("listName") ?? "").trim();
+        const target = listId === "__new" ? (await createLeadList(ctx, newName)).id : listId;
+        if (!target) throw new AppError("VALIDATION", "Liste seçin veya yeni liste adı girin.");
+        const r = await addLeadsToList(ctx, target, ids);
+        message = `"${r.name}" listesine ${r.added} firma eklendi.`;
+        break;
+      }
+      case "list_remove": {
+        const listId = String(fd.get("listId") ?? "");
+        if (!listId || listId === "__new") throw new AppError("VALIDATION", "Liste seçin.");
+        const n = await removeLeadsFromList(ctx, listId, ids);
+        message = `${n} firma listeden çıkarıldı.`;
         break;
       }
       case "status": {
