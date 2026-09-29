@@ -28,6 +28,13 @@ const NON_COMPANY_HOSTS = [
   "zoominfo.com", "dnb.com", "crunchbase.com", "opencorporates.com", "bloomberg.com", "thomasnet.com",
   "manta.com", "bbb.org", "yellowpages.", "yell.com", "glassdoor.", "companieshouse.gov.uk", "northdata.",
   "importyeti.com", "panjiva.com", "volza.com", "zauba.com", "trademo.com", "alibaba.",
+  "bizapedia.com", "buzzfile.com", "corporationwiki.com", "owler.com", "zippia.com", "dandb.com",
+  "apollo.io", "rocketreach.", "leadiq.com", "lusha.com", "signalhire.com", "hoovers.com",
+  // Ticaret odası üye dizinleri: "chamber.org" / "chambermaster" — çıplak "chamber" YAZILMAZ,
+  // gerçek firma adlarını eler (ör. Chamberlain Group garaj kapısı üreticisidir).
+  "chamber.org", "chambermaster.com", "chamberofcommerce.com",
+  // Kamu kurumları (TR dışı): eyalet/federal siteler firma sitesi değil
+  ".gov", ".mil", ".gov.uk", ".gouv.fr",
   "hurriyet.com.tr", "milliyet.com.tr", "sabah.com.tr", "haberturk.com", "ntv.com.tr", "sozcu.com.tr", "dunya.com", "bloomberght.com", "aa.com.tr",
   "gov.tr", "edu.tr", "bel.tr", "sikayetvar.com", "kariyer.net", "yenibiris.com", "secretcv.com", "indeed.",
 ];

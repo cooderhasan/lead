@@ -25,11 +25,24 @@ describe("yurt dışı arama sorgusu", () => {
     expect(searchLangForCountry("Germany")).toBe("en");
   });
 
-  it("yurt dışı firma dizinleri firma sitesi sayılmaz", () => {
-    for (const h of ["www.zoominfo.com", "dnb.com", "thomasnet.com", "importyeti.com", "uk.linkedin.com"]) {
-      expect(isNonCompanyHost(h)).toBe(true);
-    }
-    expect(isNonCompanyHost("mayerindustries.com")).toBe(false);
+  it("yurt dışı firma dizinleri, veri satıcıları ve kamu siteleri firma sitesi sayılmaz", () => {
+    const blocked = [
+      "www.zoominfo.com", "dnb.com", "thomasnet.com", "importyeti.com", "uk.linkedin.com",
+      // Canlıda yanlış eşleşen gerçek örnekler
+      "bizapedia.com", "business.huntingtonchamber.org", "deq.louisiana.gov",
+      "rocketreach.co", "apollo.io", "owler.com",
+    ];
+    for (const h of blocked) expect(isNonCompanyHost(h), h).toBe(true);
+  });
+
+  it("gerçek firma alan adlarını elemez", () => {
+    const allowed = [
+      "mayerindustries.com",
+      // "chamber" çıplak eklenirse bu üretici elenirdi (garaj kapısı motoru)
+      "chamberlaingroup.com",
+      "borgwarner.com", "overheaddoor.com", "tksna.com", "elgiloy.com",
+    ];
+    for (const h of allowed) expect(isNonCompanyHost(h), h).toBe(false);
   });
 });
 
