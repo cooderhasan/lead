@@ -483,6 +483,8 @@ function EmailDiscoverySummary({ run, canWrite }: { run: NonNullable<Awaited<Ret
     return <Alert tone="danger">E-posta araması tamamlanamadı{run.error ? `: ${run.error}` : "."} Tekrar deneyebilirsiniz.</Alert>;
   }
   const missing = run.notFound + run.blocked + run.failed;
+  // E-postası çıkmayanların bir kısmında iletişim formu var: tek kanal o olabilir
+  const withForm = run.items.filter((it) => !it.currentEmail && it.contactFormUrl).length;
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -495,6 +497,7 @@ function EmailDiscoverySummary({ run, canWrite }: { run: NonNullable<Awaited<Ret
             {run.notFound > 0 && <Badge>{run.notFound} sitede kurumsal adres yok</Badge>}
             {run.blocked > 0 && <Badge title="Site robots.txt ile otomatik taramayı yasaklıyor; buna uyuyoruz">{run.blocked} site taramaya izin vermiyor</Badge>}
             {run.failed > 0 && <Badge tone="warning" title="Alan adı yok, site kapalı veya bağlantıyı reddediyor">{run.failed} site açılmıyor</Badge>}
+            {withForm > 0 && <Badge tone="accent" title="Adres yok ama sitede mesaj formu var; mesajı siz gönderirsiniz">{withForm} firmada iletişim formu var</Badge>}
             <span className="text-xs text-text-3 self-center">toplam {run.total} firma</span>
           </div>
           {run.blocked > 0 && (
@@ -523,6 +526,16 @@ function EmailDiscoverySummary({ run, canWrite }: { run: NonNullable<Awaited<Ret
                     <p className="text-xs text-text-2">
                       {it.currentEmail ? <span className="font-medium text-success">{it.currentEmail}</span> : it.reason}
                     </p>
+                    {!it.currentEmail && it.contactFormUrl && (
+                      <a
+                        href={it.contactFormUrl}
+                        target="_blank"
+                        rel="noopener noreferrer nofollow"
+                        className="mt-0.5 inline-block truncate text-xs font-medium text-accent-text"
+                      >
+                        İletişim formunu aç →
+                      </a>
+                    )}
                   </div>
                   {canWrite && (
                     <div className="flex shrink-0 items-start gap-1.5">

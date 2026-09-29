@@ -140,6 +140,7 @@ describe("web analizi → fact taslakları", () => {
         links: [],
         emails: ["info@a.test"],
         phones: [],
+        hasContactForm: false,
       },
     ],
   };

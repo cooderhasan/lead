@@ -754,6 +754,9 @@ model Lead {
   normalizedPhone  String?
   /// Şirket genel e-postası (info@, satis@…). Kişisel adresler LeadContact'ta.
   genericEmail     String?
+  /// E-posta bulunamadığında tespit edilen iletişim formu sayfası. Form otomatik DOLDURULMAZ;
+  /// kullanıcı sayfayı açıp mesajı kendi gönderir (bkz. spec: bot gönderimi yapılmaz).
+  contactFormUrl   String?
   instagram        String?
   linkedin         String?
   facebook         String?

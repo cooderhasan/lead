@@ -26,6 +26,8 @@ export interface PageContent {
   links: string[];
   emails: string[];
   phones: string[];
+  /** Sayfada mesaj alanı olan bir iletişim formu var mı (e-posta bulunamayan firmalar için tek kanal) */
+  hasContactForm: boolean;
 }
 
 export class FetchBlockedError extends Error {
@@ -225,6 +227,9 @@ export function extractPage(html: string, pageUrl: URL): PageContent {
     .filter((h) => h.length > 1 && h.length < 200)
     .slice(0, 60);
 
+  // Form, metin çıkarılırken siliniyor → önce tespit edilir
+  const hasContactForm = detectContactForm($);
+
   $("script, style, noscript, svg, iframe, template, form").remove();
   const text = $("body").text().replace(/\s+/g, " ").trim().slice(0, MAX_TEXT_PER_PAGE);
 
@@ -242,10 +247,36 @@ export function extractPage(html: string, pageUrl: URL): PageContent {
     links: [...links],
     emails: [...emails].slice(0, 20),
     phones: [...phones].slice(0, 20),
+    hasContactForm,
   };
 }
 
-const CONTACT_PATH = /iletisim|iletişim|contact|bize-ula|ulasim|ulaşım/i;
+export const CONTACT_PATH = /iletisim|iletişim|contact|bize-ula|ulasim|ulaşım/i;
+
+/** Arama kutusu / bülten aboneliği gibi iletişim formu olmayan alan adları */
+const NON_CONTACT_FIELD = /\b(search|arama|ara|query|q|keyword|newsletter|bulten|bülten|subscribe|abone|password|parola|login|giris|giriş|coupon|kupon|qty|quantity|adet)\b/i;
+
+/**
+ * Sayfada mesaj yazılabilen bir iletişim formu var mı? Ölçüt: <textarea> içeren bir form.
+ * Arama kutuları ve bülten aboneliği kutularında mesaj alanı olmaz, bu yüzden elenir.
+ * Kesinlik iddiası yok — bulunan adres kullanıcıya "olabilir" diye gösterilir, o doğrular.
+ */
+export function detectContactForm($: cheerio.CheerioAPI): boolean {
+  let found = false;
+  $("form").each((_, el) => {
+    if (found) return;
+    const form = $(el);
+    if (form.find("textarea").length === 0) return;
+    const names = form
+      .find("input, textarea, select")
+      .map((_, f) => `${$(f).attr("name") ?? ""} ${$(f).attr("id") ?? ""}`)
+      .get()
+      .join(" ");
+    if (NON_CONTACT_FIELD.test(names)) return;
+    found = true;
+  });
+  return found;
+}
 
 /** Şirket tanımak için öncelikli sayfa anahtar kelimeleri (TR + EN). */
 const PRIORITY_KEYWORDS = [

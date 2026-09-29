@@ -367,6 +367,17 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                 <dd className="truncate text-text">{lead.phone ?? "—"}</dd>
                 <dt className="text-text-2">E-posta</dt>
                 <dd className="truncate text-text">{lead.genericEmail ?? "—"}</dd>
+                {!lead.genericEmail && safeHref(lead.contactFormUrl) && (
+                  <>
+                    <dt className="text-text-2">İletişim formu</dt>
+                    <dd className="min-w-0">
+                      <a href={safeHref(lead.contactFormUrl)!} target="_blank" rel="noopener noreferrer nofollow" className="block truncate text-accent-text">
+                        Formu aç
+                      </a>
+                      <span className="text-xs text-text-3">Mesajı siz gönderirsiniz; sistem form doldurmaz.</span>
+                    </dd>
+                  </>
+                )}
                 <dt className="text-text-2">Adres</dt>
                 <dd className="text-text">{lead.address ?? "—"}</dd>
                 <dt className="text-text-2">Çalışan</dt>

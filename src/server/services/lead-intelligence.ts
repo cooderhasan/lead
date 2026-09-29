@@ -19,7 +19,7 @@ import { isRenderConfigured } from "@/server/providers/render";
 import { isNonCompanyHost } from "@/server/providers/lead-source/apify-web";
 import { csvToRawLeads } from "@/server/providers/lead-source/csv";
 import type { LeadSearchQuery, LeadSourceKind, RawLead } from "@/server/providers/lead-source/types";
-import { crawlSite, FetchBlockedError, fetchListPage } from "@/server/web/fetch-site";
+import { CONTACT_PATH, crawlSite, FetchBlockedError, fetchListPage } from "@/server/web/fetch-site";
 import { normalizeUrl } from "@/server/web/ssrf";
 import { LIST_IMPORT_INSTRUCTIONS, LIST_IMPORT_SHAPE, listImportSchema, type ListImportOutput } from "@/server/ai/prompts/list-import";
 import { crawlToPrompt, allowPrivateFetch } from "@/server/jobs/handlers/website-analyze";
@@ -632,6 +632,8 @@ export interface EmailDiscoveryItem {
   email?: string;
   /** Kullanıcıya gösterilen neden (kişisel adresler yazılmaz — yalnızca türü söylenir) */
   reason?: string;
+  /** E-posta yoksa bulunan iletişim formu sayfası — mesajı kullanıcı elle gönderir */
+  contactFormUrl?: string;
 }
 
 export async function findLeadEmails(companyId: string, leadIds: string[], progress?: (pct: number) => Promise<void>) {
@@ -662,7 +664,10 @@ export async function findLeadEmails(companyId: string, leadIds: string[], progr
         const res = await db.lead.updateMany({ where: { id: leadId, genericEmail: null }, data: { genericEmail: email } });
         if (res.count) items.push({ ...base, outcome: "found", email });
       } else {
-        items.push({ ...base, outcome: "notFound", reason: whyNoEmail(seen, lead.website, crawl.pages.length) });
+        // E-posta yoksa iletişim formu tek kanal olabilir: adresi kaydedilir, form DOLDURULMAZ
+        const formUrl = pickContactFormUrl(crawl.pages);
+        if (formUrl) await db.lead.updateMany({ where: { id: leadId }, data: { contactFormUrl: formUrl } });
+        items.push({ ...base, outcome: "notFound", reason: whyNoEmail(seen, lead.website, crawl.pages.length), contactFormUrl: formUrl ?? undefined });
       }
     } catch (err) {
       // robots.txt yasağı ayrı sayılır: site açık ama taranmamızı istemiyor (buna uyulur)
@@ -685,6 +690,23 @@ function hostOf(website: string): string {
   } catch {
     return "";
   }
+}
+
+/**
+ * Taranan sayfalar arasından iletişim formu sayfasını seçer: adresinde "iletisim/contact"
+ * geçen sayfa öncelikli, yoksa formu olan ilk sayfa. Saf fonksiyon — testlerde doğrudan kullanılır.
+ */
+export function pickContactFormUrl(pages: Array<{ url: string; hasContactForm: boolean }>): string | null {
+  const withForm = pages.filter((p) => p.hasContactForm);
+  if (withForm.length === 0) return null;
+  const preferred = withForm.find((p) => {
+    try {
+      return CONTACT_PATH.test(decodeURIComponent(new URL(p.url).pathname));
+    } catch {
+      return false;
+    }
+  });
+  return (preferred ?? withForm[0]!).url;
 }
 
 /** Sitede adres varsa neden seçilmediğini adresi yazmadan açıklar */
