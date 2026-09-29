@@ -231,6 +231,8 @@ export const campaignCreateSchema = z.object({
   productIds: z.preprocess((v) => (v === undefined ? [] : Array.isArray(v) ? v : [v]), z.array(z.string().min(1)).max(20)),
   minScore: z.preprocess((v) => (v === "" || v == null ? undefined : Number(v)), z.number().int().min(0).max(100).optional()),
   maxLeads: z.preprocess((v) => (v === "" || v == null ? undefined : Number(v)), z.number().int().min(1).max(500).optional()),
+  /** Mesaj dili — yurt dışı kampanyalarda AI İngilizce yazar */
+  language: z.preprocess((v) => (v === "" || v == null ? undefined : v), z.enum(["tr", "en"]).optional()),
 });
 
 export const manualReplySchema = z.object({

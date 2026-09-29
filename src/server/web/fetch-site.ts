@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 import { Agent, fetch as undiciFetch } from "undici";
 import * as cheerio from "cheerio";
 import { isPrivateAddress, normalizeUrl, registrableHost } from "./ssrf";
+import { getPageRenderer } from "@/server/providers/render";
 
 export const USER_AGENT = "AISalesOS-SiteAnalyzer/1.0 (+company-profile-analysis)";
 const MAX_BYTES = 2_000_000;
@@ -423,7 +424,10 @@ const MAX_LIST_TEXT = 60_000;
  * Tek bir liste sayfasını okur ve satır yapısını koruyan düz metne çevirir (tablo satırı → "a | b | c").
  * robots.txt'ye uyar. Sayfadaki web sitesi / e-posta bağlantıları metnin sonuna eklenir (AI eşleştirebilsin).
  */
-export async function fetchListPage(input: string, opts: FetchOptions = {}): Promise<{ finalUrl: string; text: string; records: Array<Record<string, unknown>> | null }> {
+export async function fetchListPage(
+  input: string,
+  opts: FetchOptions & { render?: boolean } = {},
+): Promise<{ finalUrl: string; text: string; records: Array<Record<string, unknown>> | null; rendered: boolean }> {
   let start = normalizeUrl(input);
   let disallowed: RobotsRule[] = [];
   let reachable = false;
@@ -444,6 +448,13 @@ export async function fetchListPage(input: string, opts: FetchOptions = {}): Pro
   if (!isAllowedByRobots(start.pathname + start.search, disallowed)) {
     throw new FetchBlockedError("Bu sayfa robots.txt ile otomatik okumaya kapalı. Listeyi kopyalayıp metin olarak yapıştırabilirsiniz.");
   }
+  // Satırları JavaScript ile yükleyen sayfalar (fuar katılımcı listeleri) sunucudan boş gelir:
+  // istenirse sayfa gerçek tarayıcıda açtırılır. robots.txt kontrolü yukarıda zaten yapıldı.
+  if (opts.render) {
+    const text = await getPageRenderer().render(start.toString());
+    return { finalUrl: start.toString(), text, records: null, rendered: true };
+  }
+
   const page = await safeFetch(start, { ...opts, timeoutMs: 20_000 });
   if (page.status >= 400 || !page.body) throw new Error(`Sayfa açılamadı (HTTP ${page.status}).`);
 
@@ -459,7 +470,7 @@ export async function fetchListPage(input: string, opts: FetchOptions = {}): Pro
       /* veri kaynağı okunamadı → sayfa metniyle devam */
     }
   }
-  return { finalUrl: page.finalUrl.toString(), text: htmlToListText(page.body, page.finalUrl), records };
+  return { finalUrl: page.finalUrl.toString(), text: htmlToListText(page.body, page.finalUrl), records, rendered: false };
 }
 
 /** Sayfadaki DataTables "ajax" veri kaynağı (aynı site ise). Saf fonksiyon. */

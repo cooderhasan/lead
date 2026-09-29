@@ -5,7 +5,7 @@ import { assertCan } from "@/server/tenancy/permissions";
 import type { TenantContext } from "@/server/tenancy/types";
 import { ai, isAIConfigured } from "@/server/ai";
 import { untrusted } from "@/server/ai/guardrails";
-import { CAMPAIGN_MESSAGE_INSTRUCTIONS, CAMPAIGN_MESSAGE_SHAPE, campaignMessageSchema, campaignStrategySchema } from "@/server/ai/prompts/campaign";
+import { CAMPAIGN_MESSAGE_INSTRUCTIONS, CAMPAIGN_MESSAGE_SHAPE, campaignMessageSchema, campaignStrategySchema, isMessageLanguage, languageInstruction } from "@/server/ai/prompts/campaign";
 import { consumeCredits, refundCredits } from "@/server/usage/credits";
 import { audit } from "@/server/audit/audit";
 import { AppError, isAppError } from "@/lib/errors";
@@ -86,7 +86,7 @@ export async function processDueFollowUps(companyId: string, now = new Date()): 
     orderBy: { scheduledAt: "asc" },
     take: 50,
     include: {
-      campaign: { select: { id: true, status: true, strategy: true, strategyStatus: true } },
+      campaign: { select: { id: true, status: true, strategy: true, strategyStatus: true, language: true } },
       campaignStep: true,
       message: true,
       lead: { select: { id: true, status: true, suppressed: true, companyName: true, aiSummary: true, industry: true } },
@@ -154,6 +154,8 @@ export async function processDueFollowUps(companyId: string, now = new Date()): 
       const { data } = await ai({ companyId, operation: "followup.draft" }).extract({
         schema: campaignMessageSchema,
         instructions: `${CAMPAIGN_MESSAGE_INSTRUCTIONS}
+
+${languageInstruction(isMessageLanguage(f.campaign.language) ? f.campaign.language : "tr")}
 
 BU BİR HATIRLATMA E-POSTASIDIR:
 - Alıcı önceki e-postaya yanıt vermedi. Kısa ve nazik bir hatırlatma yaz (en fazla 80 kelime).

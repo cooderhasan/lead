@@ -15,6 +15,7 @@ import {
 } from "@/server/ai/prompts/lead-research";
 import { LEAD_SCORE_INSTRUCTIONS, LEAD_SCORE_SHAPE, leadScoreSchema } from "@/server/ai/prompts/lead-score";
 import { getWebSearchProvider, isLeadSourceConfigured, isWebSearchConfigured } from "@/server/providers/lead-source";
+import { isRenderConfigured } from "@/server/providers/render";
 import { isNonCompanyHost } from "@/server/providers/lead-source/apify-web";
 import { csvToRawLeads } from "@/server/providers/lead-source/csv";
 import type { LeadSearchQuery, LeadSourceKind, RawLead } from "@/server/providers/lead-source/types";
@@ -736,11 +737,14 @@ const LIST_MAX_CHUNKS = 2;
  * Liste sayfası adresi VEYA yapıştırılmış metinden firma içe aktarmayı başlatır.
  * AI yalnızca metni yapılandırır; her firma ve her bilgi kaynak metinde doğrulanır (uydurma kaydedilmez).
  */
-export async function startListImport(ctx: TenantContext, input: { url?: string | null; text?: string | null; filter?: string | null }) {
+export async function startListImport(ctx: TenantContext, input: { url?: string | null; text?: string | null; filter?: string | null; render?: boolean }) {
   assertCan(ctx, "lead.write");
   if (!isAIConfigured()) throw new AppError("AI_UNAVAILABLE", "Listeden içe aktarma için AI gerekli (sunucuda AI yapılandırılmamış).");
   const url = input.url?.trim() || null;
   const text = input.text?.trim() || null;
+  // Tarayıcıyla açma yalnızca adresle anlamlı ve ek maliyetli (Apify çalıştırması) → kredi iki katı
+  const render = Boolean(input.render) && Boolean(url);
+  if (render && !isRenderConfigured()) throw new AppError("VALIDATION", "Tarayıcıyla açma kapalı (APIFY_TOKEN tanımlı değil).");
   if (!url && !text) throw new AppError("VALIDATION", "Liste sayfasının adresini girin veya listeyi metin olarak yapıştırın.", { url: "Adres veya metin gerekli" });
   if (url && text) throw new AppError("VALIDATION", "Adres veya metinden yalnızca birini kullanın.");
   if (text && text.length < 40) throw new AppError("VALIDATION", "Yapıştırılan metin çok kısa.", { text: "En az birkaç firma satırı" });
@@ -755,12 +759,18 @@ export async function startListImport(ctx: TenantContext, input: { url?: string 
   const running = await db.job.findFirst({ where: { type: "lead.list_import", status: { in: ["QUEUED", "RUNNING"] } }, select: { id: true } });
   if (running) throw new AppError("CONFLICT", "Bir liste zaten işleniyor. Bitince yenisini başlatabilirsiniz.");
 
-  const { usageId } = await consumeCredits({ companyId: ctx.companyId, operation: "lead.list_import", userId: ctx.userId, refType: "lead.list_import" });
+  const { usageId } = await consumeCredits({
+    companyId: ctx.companyId,
+    operation: "lead.list_import",
+    quantity: render ? 2 : 1,
+    userId: ctx.userId,
+    refType: "lead.list_import",
+  });
   let jobId: string;
   try {
     jobId = await enqueue(
       "lead.list_import",
-      { url, text: text?.slice(0, LIST_CHUNK_CHARS * LIST_MAX_CHUNKS) ?? null, usageId, filter: parseListFilter(input.filter) },
+      { url, text: text?.slice(0, LIST_CHUNK_CHARS * LIST_MAX_CHUNKS) ?? null, usageId, filter: parseListFilter(input.filter), render },
       { companyId: ctx.companyId, createdById: ctx.userId, maxAttempts: 2 },
     );
   } catch (err) {
@@ -848,7 +858,7 @@ export function verifyListCompanies(items: ListImportOutput["companies"], text: 
 /** İş içinden çağrılır */
 export async function importFromList(
   companyId: string,
-  payload: { url?: string | null; text?: string | null; filter?: string[] },
+  payload: { url?: string | null; text?: string | null; filter?: string[]; render?: boolean },
   progress?: (pct: number) => Promise<void>,
   list?: { jobId: string; createdById?: string | null },
 ) {
@@ -856,7 +866,7 @@ export async function importFromList(
   let text = payload.text ?? "";
   let sourceUrl: string | null = null;
   if (payload.url) {
-    const page = await fetchListPage(payload.url, { allowPrivateHosts: allowPrivateFetch() });
+    const page = await fetchListPage(payload.url, { allowPrivateHosts: allowPrivateFetch(), render: payload.render });
     text = page.text;
     sourceUrl = page.finalUrl;
     // Yapılandırılmış veri (DataTables) varsa AI'sız, birebir eşleştirme — hızlı, ücretsiz, uydurma riski yok
@@ -880,7 +890,12 @@ export async function importFromList(
     }
   }
   if (text.replace(/\s+/g, "").length < 40) {
-    throw new AppError("VALIDATION", "Sayfada okunabilir liste bulunamadı (içerik JavaScript ile yükleniyor olabilir). Listeyi kopyalayıp metin olarak yapıştırın.");
+    throw new AppError(
+      "VALIDATION",
+      payload.render
+        ? "Sayfa tarayıcıyla açıldı ama liste bulunamadı. Listeyi kopyalayıp metin olarak yapıştırın."
+        : "Sayfada okunabilir liste bulunamadı (içerik JavaScript ile yükleniyor olabilir). \"Tarayıcıyla aç\" seçeneğini işaretleyip tekrar deneyin veya listeyi kopyalayıp metin olarak yapıştırın.",
+    );
   }
   await progress?.(20);
 
@@ -1194,15 +1209,34 @@ export interface WebsiteMatch {
   reason?: string;
 }
 
-/** Ünvan ekleri: arama sonucunu bozar, sorgudan atılır ("A.S." noktasızken "a" ve "s" olarak gelir) */
+/**
+ * Ünvan ekleri: arama sonucunu bozar, sorgudan atılır ("A.S." noktasızken "a" ve "s" olarak gelir).
+ * Türkçe ve yurt dışı ekleri birlikte tutulur — bir firma adı yalnızca bu eklerden oluşmaz,
+ * dolayısıyla hepsini birden elemek güvenli.
+ */
 const COMPANY_SUFFIXES = new Set([
+  // Türkçe
   "san", "sanayi", "tic", "ticaret", "ltd", "limited", "sti", "a", "as", "s", "anonim", "sirketi",
   "kollektif", "koll", "ve", "ith", "ithalat", "ihr", "ihracat", "paz", "pazarlama", "muh",
   "muhendislik", "ins", "insaat", "taah", "taahhut", "tur", "turizm",
+  // Yurt dışı
+  "inc", "llc", "lp", "llp", "corp", "corporation", "co", "company", "plc", "gmbh", "mbh", "ag", "kg",
+  "bv", "nv", "sa", "sas", "sarl", "srl", "spa", "sl", "oy", "ab", "aps", "kft", "doo", "zoo",
+  "pte", "pty", "sdn", "bhd", "the", "and",
 ]);
 
-/** Firma adını arama sorgusuna çevirir: ünvan ekleri ("San. Tic. Ltd. Şti.") aramayı bozar, atılır */
-export function websiteQuery(companyName: string, city?: string | null): string {
+/** Sorgu dili: firma yurt dışındaysa İngilizce arama daha isabetli sonuç verir. */
+export type SearchLang = "tr" | "en";
+
+/** Ülke koduna göre sorgu dili. Ülke yoksa Türkiye varsayılır (ana pazar). */
+export function searchLangForCountry(country?: string | null): SearchLang {
+  const c = (country ?? "").trim().toLowerCase();
+  if (!c) return "tr";
+  return c === "tr" || c === "turkey" || c === "türkiye" || c === "turkiye" ? "tr" : "en";
+}
+
+/** Firma adını arama sorgusuna çevirir: ünvan ekleri ("San. Tic. Ltd. Şti.", "Inc.", "GmbH") aramayı bozar, atılır */
+export function websiteQuery(companyName: string, city?: string | null, lang: SearchLang = "tr"): string {
   const cleaned = companyName
     .replace(/\(.*?\)/g, " ")
     .replace(/[.,]/g, " ")
@@ -1212,7 +1246,7 @@ export function websiteQuery(companyName: string, city?: string | null): string 
     .join(" ")
     .trim();
   const base = (cleaned.length >= 4 ? cleaned : companyName).slice(0, 80);
-  return [base, city, "resmi web sitesi"].filter(Boolean).join(" ");
+  return [base, city, lang === "en" ? "official website" : "resmi web sitesi"].filter(Boolean).join(" ");
 }
 
 /**
@@ -1284,14 +1318,17 @@ export async function runWebsiteDiscovery(
   helpers?: { progress?: (pct: number) => Promise<void>; saveRunId?: (runId: string) => Promise<void> },
 ) {
   const db = tenantDb({ companyId });
-  const leads = await db.lead.findMany({ where: { id: { in: payload.leadIds }, website: null }, select: { id: true, companyName: true, city: true } });
+  const leads = await db.lead.findMany({ where: { id: { in: payload.leadIds }, website: null }, select: { id: true, companyName: true, city: true, country: true } });
   if (leads.length === 0) return { total: 0, found: 0, notFound: 0, items: [] as WebsiteMatch[] };
 
   const provider = getWebSearchProvider();
-  const queries = leads.map((l) => websiteQuery(l.companyName, l.city));
+  // Sorgu dili firma bazında; arama motorunun ülke/dil ayarı tek olduğu için çoğunluğa göre belirlenir
+  const langs = leads.map((l) => searchLangForCountry(l.country));
+  const queries = leads.map((l, i) => websiteQuery(l.companyName, l.city, langs[i]!));
+  const dominant: SearchLang = langs.filter((x) => x === "en").length > langs.length / 2 ? "en" : "tr";
   let runId = payload.runId;
   if (!runId) {
-    runId = await provider.startRawSearch(queries);
+    runId = await provider.startRawSearch(queries, { lang: dominant });
     await helpers?.saveRunId?.(runId);
   }
   await helpers?.progress?.(15);

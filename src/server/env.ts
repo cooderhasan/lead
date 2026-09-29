@@ -51,6 +51,8 @@ const schema = z.object({
   APIFY_GOOGLE_MAPS_ACTOR: optionalString,
   /** Google arama sonuçları actor kimliği (web araması kaynağı) */
   APIFY_WEB_SEARCH_ACTOR: optionalString,
+  /** Sayfayı tarayıcıda açıp metnini döndüren actor (JavaScript ile yüklenen liste sayfaları için) */
+  APIFY_RENDER_ACTOR: optionalString,
   /** Tek aramada en fazla kaç lead toplanır (kredi koruması) */
   LEAD_SEARCH_MAX: z.coerce.number().int().min(1).max(500).default(50),
   /** smtp | resend | brevo — boşsa e-posta gönderimi kapalı (mesaj üretimi ve onay çalışır) */

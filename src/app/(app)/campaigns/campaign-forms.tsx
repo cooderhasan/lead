@@ -9,7 +9,7 @@ import {
   saveMessageAction,
 } from "@/app/actions/campaigns";
 import { ActionForm, FormMessage, SubmitButton } from "@/components/forms";
-import { Badge, Button, Field, Input, Textarea } from "@/components/ui";
+import { Badge, Button, Field, Input, Select, Textarea } from "@/components/ui";
 
 export function CampaignCreateForm({ products }: { products: Array<{ id: string; name: string }> }) {
   return (
@@ -55,6 +55,12 @@ export function CampaignCreateForm({ products }: { products: Array<{ id: string;
             </Field>
             <Field label="En fazla lead" htmlFor="maxLeads" error={state.fieldErrors?.maxLeads}>
               <Input id="maxLeads" name="maxLeads" type="number" min={1} max={500} defaultValue={50} />
+            </Field>
+            <Field label="Mesaj dili" htmlFor="language" hint="Yurt dışı firmalara yazarken İngilizce seçin." error={state.fieldErrors?.language}>
+              <Select id="language" name="language" defaultValue="tr">
+                <option value="tr">Türkçe</option>
+                <option value="en">İngilizce</option>
+              </Select>
             </Field>
           </div>
           <SubmitButton pendingText="Lead'ler ve uyum kontrol ediliyor…" className="self-start">Kampanya oluştur</SubmitButton>

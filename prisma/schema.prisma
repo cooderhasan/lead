@@ -950,6 +950,8 @@ model Campaign {
   status            CampaignStatus @default(DRAFT)
   targetDescription String
   targetMarketId    String?
+  /// Mesaj dili: "tr" | "en" — yurt dışı kampanyalarda AI İngilizce yazar
+  language          String         @default("tr")
   /// Doğal dil hedefin filtreye çevrilmiş hali (ülke, şehir, sektör, çalışan…)
   filters           Json?
   /// AI kampanya stratejisi (değer önerisi, karar verici, itirazlar…)

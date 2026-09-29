@@ -83,6 +83,15 @@ export function ListImportForm({ enabled }: { enabled: boolean }) {
           >
             <Input id="list-filter" name="filter" placeholder="ör. otomotiv, makina, pres, döküm" maxLength={300} disabled={!enabled} />
           </Field>
+          <label className="flex items-start gap-2 text-sm text-text-2">
+            <input type="checkbox" name="render" className="mt-0.5 size-4 shrink-0 accent-[var(--accent)]" disabled={!enabled} />
+            <span>
+              Sayfayı tarayıcıyla aç
+              <span className="block text-xs text-text-3">
+                Liste JavaScript ile yükleniyorsa (çoğu büyük fuar sitesi) işaretleyin. Daha yavaş ve 6 kredi.
+              </span>
+            </span>
+          </label>
           <details>
             <summary className="cursor-pointer text-xs font-medium text-accent-text">Sayfa açılmıyorsa veya liste PDF&apos;teyse: metni yapıştır</summary>
             <Textarea name="text" rows={5} maxLength={50_000} className="mt-2 text-xs" placeholder="Listeyi kopyalayıp buraya yapıştırın (adres alanını boş bırakın)" disabled={!enabled} />

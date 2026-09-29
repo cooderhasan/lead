@@ -24,6 +24,10 @@ const NON_COMPANY_HOSTS = [
   "sahibinden.com", "trendyol.com", "hepsiburada.com", "n11.com", "amazon.", "alibaba.com", "aliexpress.", "ebay.", "etsy.com", "ciceksepeti.com",
   "yandex.", "bing.com", "yelp.", "foursquare.com", "tripadvisor.",
   "firmasec.com", "bulurum.com", "firmarehberi", "rehber", "kompass.", "europages.", "made-in-", "tradeindia.", "indiamart.", "turkishexporter", "exporthub", "globalpiyasa.com", "tobb.org.tr",
+  // Yurt dışı firma dizinleri / veri satıcıları — firma sitesi değil
+  "zoominfo.com", "dnb.com", "crunchbase.com", "opencorporates.com", "bloomberg.com", "thomasnet.com",
+  "manta.com", "bbb.org", "yellowpages.", "yell.com", "glassdoor.", "companieshouse.gov.uk", "northdata.",
+  "importyeti.com", "panjiva.com", "volza.com", "zauba.com", "trademo.com", "alibaba.",
   "hurriyet.com.tr", "milliyet.com.tr", "sabah.com.tr", "haberturk.com", "ntv.com.tr", "sozcu.com.tr", "dunya.com", "bloomberght.com", "aa.com.tr",
   "gov.tr", "edu.tr", "bel.tr", "sikayetvar.com", "kariyer.net", "yenibiris.com", "secretcv.com", "indeed.",
 ];
@@ -84,10 +88,12 @@ export class ApifyWebSearchProvider implements LeadSourceProvider {
   }
 
   /** Serbest sorgu listesi (her firma adı bir sorgu). Sonuçlar sorguya göre gruplanır. */
-  async startRawSearch(queries: string[]): Promise<string> {
+  async startRawSearch(queries: string[], opts?: { lang?: "tr" | "en" }): Promise<string> {
+    // "en" istendiğinde ülke kısıtı değişir: yurt dışı firmanın sitesi TR sonuçlarında çıkmayabilir
+    const locale = opts?.lang === "en" ? { countryCode: "us", languageCode: "en" } : { countryCode: "tr", languageCode: "tr" };
     const run = await this.call<{ data: { id: string } }>(`/acts/${this.actorId}/runs`, {
       method: "POST",
-      body: JSON.stringify({ queries: queries.slice(0, 50).join("\n"), maxPagesPerQuery: 1, countryCode: "tr", languageCode: "tr", mobileResults: false }),
+      body: JSON.stringify({ queries: queries.slice(0, 50).join("\n"), maxPagesPerQuery: 1, ...locale, mobileResults: false }),
     });
     return run.data.id;
   }

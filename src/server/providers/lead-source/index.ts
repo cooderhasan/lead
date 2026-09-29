@@ -25,7 +25,8 @@ export function getLeadSourceProvider(kind: LeadSourceKind = "maps"): LeadSource
 }
 
 export interface WebSearchProvider {
-  startRawSearch(queries: string[]): Promise<string>;
+  /** `lang`: arama motorunun ülke/dil ayarı — yurt dışı firmada "en" daha isabetli sonuç verir. */
+  startRawSearch(queries: string[], opts?: { lang?: "tr" | "en" }): Promise<string>;
   fetchRawResults(runId: string): Promise<Map<string, Array<{ title: string; url: string }>> | null>;
 }
 

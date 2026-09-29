@@ -29,7 +29,7 @@ export interface JobPayloads {
     enrichUsageId?: string;
     scoreUsageId?: string;
   };
-  "lead.list_import": { url: string | null; text: string | null; usageId?: string; filter?: string[] };
+  "lead.list_import": { url: string | null; text: string | null; usageId?: string; filter?: string[]; render?: boolean };
   /** Kampanya stratejisi (AI) — sonuç PENDING, insan onayı bekler */
   "campaign.strategy": { campaignId: string; usageId?: string };
   /** Kampanya ilk temas mesajları (AI) — her mesaj PENDING_APPROVAL */

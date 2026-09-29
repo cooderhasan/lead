@@ -67,7 +67,8 @@ export async function importListAction(_: ActionState, fd: FormData): Promise<Ac
     const url = String(fd.get("url") ?? "").trim();
     const text = String(fd.get("text") ?? "").trim();
     const filter = String(fd.get("filter") ?? "").trim();
-    await startListImport(ctx, { url: url || null, text: text || null, filter: filter || null });
+    const render = fd.get("render") === "on";
+    await startListImport(ctx, { url: url || null, text: text || null, filter: filter || null, render });
     revalidatePath("/leads");
     return { ok: true, message: "Liste işleniyor; ilerleme bu kartta görünecek." };
   });

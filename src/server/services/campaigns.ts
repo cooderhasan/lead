@@ -8,6 +8,9 @@ import { ai, isAIConfigured } from "@/server/ai";
 import { untrusted } from "@/server/ai/guardrails";
 import {
   CAMPAIGN_MESSAGE_INSTRUCTIONS,
+  languageInstruction,
+  isMessageLanguage,
+  type MessageLanguage,
   CAMPAIGN_MESSAGE_SHAPE,
   CAMPAIGN_STRATEGY_INSTRUCTIONS,
   CAMPAIGN_STRATEGY_SHAPE,
@@ -141,6 +144,7 @@ export async function createCampaign(ctx: TenantContext, input: z.infer<typeof c
       companyId: ctx.companyId,
       name: input.name,
       targetDescription: input.targetDescription,
+      language: input.language ?? "tr",
       filters: { minScore, maxLeads: input.maxLeads ?? DEFAULT_MAX_LEADS } as Prisma.InputJsonValue,
       createdById: ctx.userId,
       products: { connect: products.map((p) => ({ id: p.id })) },
@@ -241,6 +245,11 @@ export async function startStrategyGeneration(ctx: TenantContext, campaignId: st
   }
 }
 
+/** Kayıttaki dil değeri geçersizse (eski kampanya) Türkçe varsayılır. */
+function campaignLanguage(value: string): MessageLanguage {
+  return isMessageLanguage(value) ? value : "tr";
+}
+
 /** İş içinden çağrılır. Strateji PENDING kaydedilir; insan onaylamadan mesaj üretilmez. */
 export async function generateStrategy(companyId: string, campaignId: string) {
   const db = tenantDb({ companyId });
@@ -268,7 +277,9 @@ export async function generateStrategy(companyId: string, campaignId: string) {
 
   const { data } = await ai({ companyId, operation: "campaign.strategy" }).extract({
     schema: campaignStrategySchema,
-    instructions: CAMPAIGN_STRATEGY_INSTRUCTIONS,
+    instructions: `${CAMPAIGN_STRATEGY_INSTRUCTIONS}
+
+${languageInstruction(campaignLanguage(campaign.language))}`,
     shape: CAMPAIGN_STRATEGY_SHAPE,
     input: [
       `DOĞRULANMIŞ BİLGİ (satıcı):\n${JSON.stringify({ name: verified.name, sector: verified.sector, summary: verified.summary, facts: verified.facts, rules: verified.rules })}`,
@@ -413,6 +424,7 @@ export async function generateCampaignMessages(
   });
   if (!campaign?.steps[0]) throw new AppError("NOT_FOUND", "Kampanya veya ilk adım bulunamadı.");
   const step = campaign.steps[0];
+  const lang = campaignLanguage(campaign.language);
   const strategy = campaignStrategySchema.parse(campaign.strategy);
   const { verified, text: corpus } = await verifiedCorpus(companyId);
   const { settings } = await getSenderSettings(companyId);
@@ -443,7 +455,9 @@ export async function generateCampaignMessages(
 
       const { data } = await ai({ companyId, operation: "campaign.message" }).extract({
         schema: campaignMessageSchema,
-        instructions: CAMPAIGN_MESSAGE_INSTRUCTIONS,
+        instructions: `${CAMPAIGN_MESSAGE_INSTRUCTIONS}
+
+${languageInstruction(lang)}`,
         shape: CAMPAIGN_MESSAGE_SHAPE,
         input: [
           `DOĞRULANMIŞ BİLGİ (satıcı):\n${JSON.stringify({ name: verified.name, summary: verified.summary, facts: verified.facts })}`,
