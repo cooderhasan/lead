@@ -7,6 +7,7 @@ import { CAMPAIGN_STATUS_LABELS } from "@/server/services/campaigns";
 import { LOST_REASON_LABELS } from "@/server/services/crm";
 import { Card, CardBody, CardHeader, EmptyState, PageHeader, Stat } from "@/components/ui";
 import { cn, formatNumber } from "@/lib/cn";
+import { MAILBOX_BUCKET_LABELS } from "@/lib/lead-normalize";
 import type { LostReason } from "@prisma/client";
 
 export const metadata: Metadata = { title: "Analitik" };
@@ -44,6 +45,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
   const funnelMax = Math.max(...funnel.map((x) => x.value), 1);
   const catMax = Math.max(...a.replyCategories.map((c) => c.count), 1);
   const empty = f.leadsDiscovered + f.emailsSent + f.replies === 0;
+  const addressSent = a.addressTypes.reduce((s, r) => s + r.sent, 0);
 
   return (
     <>
@@ -102,6 +104,52 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
               </CardBody>
             </Card>
           </div>
+
+          <Card>
+            <CardHeader
+              title="Adres tipine göre yanıt"
+              description="Hangi kutuya yazmak işe yarıyor: genel kutu mu, satınalma mı, kişiye özel adres mi."
+            />
+            {a.addressTypes.length === 0 ? (
+              <CardBody><p className="text-sm text-text-3">Bu dönemde gönderilen ileti yok.</p></CardBody>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[520px] text-sm">
+                    <thead className="border-b border-border text-left text-xs text-text-2">
+                      <tr>
+                        <th className="px-5 py-2.5 font-medium">Adres tipi</th>
+                        <th className="px-3 py-2.5 text-right font-medium">Gönderilen</th>
+                        <th className="px-3 py-2.5 text-right font-medium">Yanıt</th>
+                        <th className="px-3 py-2.5 text-right font-medium">Olumlu</th>
+                        <th className="px-3 py-2.5 text-right font-medium">Geri dönen</th>
+                        <th className="px-5 py-2.5 text-right font-medium">Yanıt oranı</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {a.addressTypes.map((r) => (
+                        <tr key={r.bucket}>
+                          <td className="px-5 py-2.5 font-medium text-text">{MAILBOX_BUCKET_LABELS[r.bucket]}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{formatNumber(r.sent)}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{formatNumber(r.replies)}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{formatNumber(r.positive)}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{formatNumber(r.bounced)}</td>
+                          <td className="px-5 py-2.5 text-right tabular-nums">{rate(r.replyRatePct)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {addressSent < 30 && (
+                  <CardBody className="border-t border-border pt-4">
+                    <p className="text-sm text-text-3">
+                      Bu dönemde {formatNumber(addressSent)} ileti gönderildi. Oranları karşılaştırmak için kırılım başına en az 30 gönderim gerekir; şimdilik yön gösterici sayın.
+                    </p>
+                  </CardBody>
+                )}
+              </>
+            )}
+          </Card>
 
           <Card>
             <CardHeader title="Kampanyalar" />

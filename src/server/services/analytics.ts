@@ -3,6 +3,7 @@ import type { ReplyCategory } from "@prisma/client";
 import { tenantDb } from "@/server/tenancy/tenant-db";
 import { assertCan } from "@/server/tenancy/permissions";
 import type { TenantContext } from "@/server/tenancy/types";
+import { type MailboxBucket, mailboxBucket } from "@/lib/lead-normalize";
 import { POSITIVE_CATEGORIES } from "./conversations";
 
 const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 1000) / 10 : null);
@@ -33,6 +34,15 @@ export interface AnalyticsSnapshot {
     winRatePct: number | null;
   };
   replyCategories: Array<{ category: ReplyCategory; count: number }>;
+  /** Gönderilen adres tipine göre yanıt kırılımı (info@ mı, satinalma@ mı, kişiye özel mi daha iyi çalışıyor). */
+  addressTypes: Array<{
+    bucket: MailboxBucket;
+    sent: number;
+    replies: number;
+    positive: number;
+    bounced: number;
+    replyRatePct: number | null;
+  }>;
   lostReasons: Array<{ reason: string; count: number }>;
   campaigns: Array<{
     id: string;
@@ -74,6 +84,8 @@ export async function getAnalytics(ctx: TenantContext, periodDays = 30): Promise
     campaigns,
     aiAgg,
     creditAgg,
+    sentRows,
+    inboundRows,
   ] = await Promise.all([
     db.lead.count({ where: { discoveredAt: { gte: since } } }),
     db.leadScore.count({ where: { createdAt: { gte: since } } }),
@@ -97,6 +109,8 @@ export async function getAnalytics(ctx: TenantContext, periodDays = 30): Promise
     }),
     db.aIUsageLog.aggregate({ where: { createdAt: { gte: since } }, _count: true, _sum: { estimatedCostUsd: true } }),
     db.usageRecord.aggregate({ where: { createdAt: { gte: since }, credits: { lt: 0 } }, _sum: { credits: true } }),
+    db.message.findMany({ where: { direction: "OUTBOUND", sentAt: { gte: since } }, select: { contactId: true, toAddress: true, status: true, conversationId: true } }),
+    db.conversationMessage.findMany({ where: { direction: "INBOUND", receivedAt: { gte: since } }, select: { conversationId: true, category: true } }),
   ]);
 
   const replyCategories = categoryRows
@@ -104,6 +118,38 @@ export async function getAnalytics(ctx: TenantContext, periodDays = 30): Promise
     .map((r) => ({ category: r.category!, count: r._count._all }))
     .sort((a, b) => b.count - a.count);
   const positiveReplies = replyCategories.filter((r) => POSITIVE_CATEGORIES.includes(r.category)).reduce((s, r) => s + r.count, 0);
+
+  // Adres tipi kırılımı: yanıt, giden iletinin bağlı olduğu konuşmadan gelir (gelen ileti
+  // conversations.ts'te ilgili giden iletiyle eşleştirilip conversationId yazılır).
+  const repliesByConversation = new Map<string, { replies: number; positive: number }>();
+  for (const r of inboundRows) {
+    if (!r.conversationId) continue;
+    const e = repliesByConversation.get(r.conversationId) ?? { replies: 0, positive: 0 };
+    e.replies += 1;
+    if (r.category && POSITIVE_CATEGORIES.includes(r.category)) e.positive += 1;
+    repliesByConversation.set(r.conversationId, e);
+  }
+  const bucketStats = new Map<MailboxBucket, { sent: number; replies: number; positive: number; bounced: number }>();
+  // Takip iletileri aynı konuşmayı paylaşır; yanıt bir kez sayılsın
+  const countedConversations = new Set<string>();
+  for (const m of sentRows) {
+    const bucket = mailboxBucket(m.toAddress, m.contactId !== null);
+    const e = bucketStats.get(bucket) ?? { sent: 0, replies: 0, positive: 0, bounced: 0 };
+    e.sent += 1;
+    if (m.status === "BOUNCED") e.bounced += 1;
+    if (m.conversationId && !countedConversations.has(m.conversationId)) {
+      const inb = repliesByConversation.get(m.conversationId);
+      if (inb) {
+        e.replies += inb.replies;
+        e.positive += inb.positive;
+        countedConversations.add(m.conversationId);
+      }
+    }
+    bucketStats.set(bucket, e);
+  }
+  const addressTypes = [...bucketStats.entries()]
+    .map(([bucket, s]) => ({ bucket, ...s, replyRatePct: pct(s.replies, s.sent) }))
+    .sort((a, b) => b.sent - a.sent);
 
   const campaignStats = [];
   for (const c of campaigns) {
@@ -153,6 +199,7 @@ export async function getAnalytics(ctx: TenantContext, periodDays = 30): Promise
       winRatePct: pct(won, won + lost),
     },
     replyCategories,
+    addressTypes,
     lostReasons: lostRows.filter((r) => r.lostReason).map((r) => ({ reason: r.lostReason!, count: r._count._all })),
     campaigns: campaignStats,
     ai: {

@@ -123,6 +123,39 @@ function sharesCompanyName(local: string, siteToken: string): boolean {
   return false;
 }
 
+/**
+ * Rapor kırılımı: bir iletinin hangi tip adrese gittiği. "info@ kutusuna sekreter bakıp
+ * iletmiyor mu?" sorusunun tahminle değil veriyle cevaplanması için kullanılır.
+ */
+export type MailboxBucket = "person" | "purchasing" | "info" | "sales" | "contact" | "other";
+
+export const MAILBOX_BUCKET_LABELS: Record<MailboxBucket, string> = {
+  person: "Kişiye özel",
+  purchasing: "satinalma@",
+  info: "info@ / bilgi@",
+  sales: "satis@ / siparis@",
+  contact: "iletisim@",
+  other: "Diğer",
+};
+
+const BUCKET_OF: Record<string, MailboxBucket> = {
+  satinalma: "purchasing", purchasing: "purchasing", tedarik: "purchasing",
+  info: "info", info1: "info", infotr: "info", bilgi: "info", genel: "info", kurumsal: "info", mail: "info", office: "info", ofis: "info",
+  satis: "sales", sales: "sales", siparis: "sales", order: "sales", orders: "sales", teklif: "sales", pazarlama: "sales", marketing: "sales",
+  iletisim: "contact", contact: "contact", hello: "contact", merhaba: "contact",
+};
+
+/**
+ * `isPersonal`: ileti bir LeadContact'a (kişi) mı gitti — kutu adına bakılmaz, çünkü
+ * kişi kaydı varsa adres zaten o kişinindir. Tanınmayan kutu "other" olur (uydurma sınıf yok).
+ */
+export function mailboxBucket(address: string | null | undefined, isPersonal: boolean): MailboxBucket {
+  if (isPersonal) return "person";
+  // toLowerCase (toLocaleLowerCase değil): "INFO" tr yerelinde "ınfo" olur ve eşleşmez
+  const local = (address ?? "").split("@")[0]?.toLowerCase().replace(/[._-]/g, "") ?? "";
+  return BUCKET_OF[local] ?? "other";
+}
+
 /** Kurumsal genel kutu mu (info@…) yoksa kişiye ait mi? Kişisel adresler LeadContact'ta ayrı tutulur. */
 export function isGenericEmail(email: string | null | undefined): boolean {
   if (!email) return false;
