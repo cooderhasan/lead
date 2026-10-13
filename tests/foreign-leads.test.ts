@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { searchLangForCountry, websiteQuery } from "@/server/services/lead-intelligence";
 import { isMessageLanguage, languageInstruction } from "@/server/ai/prompts/campaign";
+import { isDomesticCountry, TURKEY_COUNTRY_VARIANTS } from "@/lib/market";
 import { isNonCompanyHost } from "@/server/providers/lead-source/apify-web";
 import { __setRendererForTests } from "@/server/providers/render";
 import { fetchListPage } from "@/server/web/fetch-site";
@@ -23,6 +24,12 @@ describe("yurt dışı arama sorgusu", () => {
     expect(searchLangForCountry("Türkiye")).toBe("tr");
     expect(searchLangForCountry("US")).toBe("en");
     expect(searchLangForCountry("Germany")).toBe("en");
+  });
+
+  it("yurt içi / yurt dışı ayrımı farklı yazımları tanır (kampanya pazarı)", () => {
+    for (const c of [null, "", "  ", "TR", "tr", "Türkiye", "TÜRKİYE", "TURKIYE", "Turkey", "TUR"]) expect(isDomesticCountry(c)).toBe(true);
+    for (const c of ["US", "Germany", "DE", "Azerbaijan"]) expect(isDomesticCountry(c)).toBe(false);
+    for (const v of ["TR", "Türkiye", "TÜRKİYE", "Turkey", "TURKEY"]) expect(TURKEY_COUNTRY_VARIANTS).toContain(v);
   });
 
   it("yurt dışı firma dizinleri, veri satıcıları ve kamu siteleri firma sitesi sayılmaz", () => {

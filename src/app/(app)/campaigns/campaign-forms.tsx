@@ -56,7 +56,7 @@ export function CampaignCreateForm({ products }: { products: Array<{ id: string;
             <Field label="En fazla lead" htmlFor="maxLeads" error={state.fieldErrors?.maxLeads}>
               <Input id="maxLeads" name="maxLeads" type="number" min={1} max={500} defaultValue={50} />
             </Field>
-            <Field label="Mesaj dili" htmlFor="language" hint="Yurt dışı firmalara yazarken İngilizce seçin." error={state.fieldErrors?.language}>
+            <Field label="Mesaj dili" htmlFor="language" hint="Türkçe → yalnızca yurt içi firmalar, İngilizce → yalnızca yurt dışı firmalar seçilir." error={state.fieldErrors?.language}>
               <Select id="language" name="language" defaultValue="tr">
                 <option value="tr">Türkçe</option>
                 <option value="en">İngilizce</option>

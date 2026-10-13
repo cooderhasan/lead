@@ -28,6 +28,7 @@ import { checkMessageQuality, type QualityIssue } from "./message-quality";
 import { getSenderSettings, senderReadiness } from "./email-settings";
 import type { LeadEnrichment } from "./lead-intelligence";
 import { AppError } from "@/lib/errors";
+import { isDomesticCountry, TURKEY_COUNTRY_VARIANTS } from "@/lib/market";
 import type { campaignCreateSchema } from "@/lib/validation";
 
 export const CAMPAIGN_STATUS_LABELS: Record<CampaignStatus, string> = {
@@ -110,6 +111,17 @@ export async function listCampaignMessages(ctx: TenantContext, filter: { campaig
 // ── Oluşturma ──────────────────────────────────────────────────────────
 
 /**
+ * Kampanya dilinin pazarı: Türkçe → Türkiye'deki lead'ler (ülkesi boş olanlar dahil), İngilizce → yurt dışı.
+ * Yurt içi ve yurt dışı firmalar aynı kampanyaya karışmasın.
+ */
+function leadMarketWhere(language: string): Prisma.LeadWhereInput {
+  const domestic: Prisma.LeadWhereInput = { OR: [{ country: null }, { country: "" }, { country: { in: TURKEY_COUNTRY_VARIANTS } }] };
+  return language === "en" ? { NOT: domestic } : domestic;
+}
+
+const marketLabel = (language: string) => (language === "en" ? "yurt dışı" : "yurt içi");
+
+/**
  * Kampanya taslağı: seçilen ürünler + puan eşiğine göre lead listesi.
  * Her lead için uyum (compliance) değerlendirmesi hemen yapılır.
  */
@@ -125,8 +137,14 @@ export async function createCampaign(ctx: TenantContext, input: z.infer<typeof c
   }
 
   const minScore = input.minScore ?? DEFAULT_MIN_SCORE;
+  const language = input.language ?? "tr";
   const leads = await db.lead.findMany({
-    where: { fitScore: { gte: minScore }, suppressed: false, status: { notIn: [...EXCLUDED_LEAD_STATUSES] } },
+    where: {
+      fitScore: { gte: minScore },
+      suppressed: false,
+      status: { notIn: [...EXCLUDED_LEAD_STATUSES] },
+      AND: [leadMarketWhere(language)],
+    },
     orderBy: { fitScore: "desc" },
     take: input.maxLeads ?? DEFAULT_MAX_LEADS,
     select: { id: true, fitScore: true },
@@ -134,7 +152,7 @@ export async function createCampaign(ctx: TenantContext, input: z.infer<typeof c
   if (leads.length === 0) {
     throw new AppError(
       "VALIDATION",
-      `Puanı ${minScore} ve üzeri olan uygun lead yok. Önce Leads ekranında lead bulup puanlayın veya eşiği düşürün.`,
+      `Puanı ${minScore} ve üzeri olan uygun ${marketLabel(language)} lead yok (kampanya dili ${language === "en" ? "İngilizce" : "Türkçe"} olduğu için yalnızca ${marketLabel(language)} firmalar seçilir). Önce Leads ekranında lead bulup puanlayın veya eşiği düşürün.`,
       { minScore: "Uygun lead yok" },
     );
   }
@@ -144,7 +162,7 @@ export async function createCampaign(ctx: TenantContext, input: z.infer<typeof c
       companyId: ctx.companyId,
       name: input.name,
       targetDescription: input.targetDescription,
-      language: input.language ?? "tr",
+      language,
       filters: { minScore, maxLeads: input.maxLeads ?? DEFAULT_MAX_LEADS } as Prisma.InputJsonValue,
       createdById: ctx.userId,
       products: { connect: products.map((p) => ({ id: p.id })) },
@@ -688,15 +706,19 @@ export async function listOpenCampaigns(ctx: TenantContext) {
 export async function addLeadsToCampaign(ctx: TenantContext, campaignId: string, leadIds: string[]) {
   assertCan(ctx, "campaign.write");
   const db = tenantDb(ctx);
-  const campaign = await db.campaign.findUnique({ where: { id: campaignId }, select: { id: true, status: true, name: true } });
+  const campaign = await db.campaign.findUnique({ where: { id: campaignId }, select: { id: true, status: true, name: true, language: true } });
   if (!campaign) throw new AppError("NOT_FOUND", "Kampanya bulunamadı.");
   if (!CAMPAIGN_OPEN_STATUSES.includes(campaign.status)) throw new AppError("CONFLICT", "Bu kampanyaya artık lead eklenemez.");
 
   const already = new Set((await db.campaignLead.findMany({ where: { campaignId }, select: { leadId: true } })).map((c) => c.leadId));
-  const leads = await db.lead.findMany({
+  const candidates = await db.lead.findMany({
     where: { id: { in: [...new Set(leadIds)] }, suppressed: false, status: { notIn: [...EXCLUDED_LEAD_STATUSES] } },
-    select: { id: true, fitScore: true },
+    select: { id: true, fitScore: true, country: true },
   });
+  // Kampanyanın pazarına uymayanlar (Türkçe kampanyaya yurt dışı firma vb.) eklenmez
+  const wantDomestic = campaign.language !== "en";
+  const leads = candidates.filter((l) => isDomesticCountry(l.country) === wantDomestic);
+  const wrongMarket = candidates.filter((l) => !already.has(l.id)).length - leads.filter((l) => !already.has(l.id)).length;
   // Başka bir açık kampanyada olan firmalar: ekip içi çakışma uyarısı (alıcıyı sıklık kuralları korur)
   const inOther = new Set(
     (
@@ -716,8 +738,8 @@ export async function addLeadsToCampaign(ctx: TenantContext, campaignId: string,
     await db.campaignLead.create({ data: { companyId: ctx.companyId, campaignId, leadId: l.id, score: l.fitScore, complianceStatus } });
     added++;
   }
-  const skipped = leadIds.length - added;
+  const skipped = leadIds.length - added - wrongMarket;
   const alsoInOther = leads.filter((l) => inOther.has(l.id) && !already.has(l.id)).length;
-  await audit({ companyId: ctx.companyId, userId: ctx.userId, action: "campaign.leads_added", entityType: "Campaign", entityId: campaignId, metadata: { added, skipped } });
-  return { added, skipped, noEmail, alsoInOther, campaignName: campaign.name };
+  await audit({ companyId: ctx.companyId, userId: ctx.userId, action: "campaign.leads_added", entityType: "Campaign", entityId: campaignId, metadata: { added, skipped, wrongMarket } });
+  return { added, skipped, noEmail, alsoInOther, wrongMarket, market: marketLabel(campaign.language), campaignName: campaign.name };
 }

@@ -31,6 +31,7 @@ import { evidenceFound, normalizeForMatch, valueFound } from "./evidence";
 import { createLeadList, ensureJobList, saveDiscoveredLeads } from "./leads";
 import { AppError } from "@/lib/errors";
 import { computeReachability, finalizeScore } from "@/lib/lead-scoring";
+import { isDomesticCountry } from "@/lib/market";
 import { extractDomain, isCompanyEmail, isGenericEmail, nameSimilarity, normalizeEmail, normalizePhone, pickCompanyEmail } from "@/lib/lead-normalize";
 import { checkEmailQuality } from "@/lib/email-quality";
 import { checkMailDomain } from "@/server/providers/email/mx";
@@ -1252,9 +1253,7 @@ export type SearchLang = "tr" | "en";
 
 /** Ülke koduna göre sorgu dili. Ülke yoksa Türkiye varsayılır (ana pazar). */
 export function searchLangForCountry(country?: string | null): SearchLang {
-  const c = (country ?? "").trim().toLowerCase();
-  if (!c) return "tr";
-  return c === "tr" || c === "turkey" || c === "türkiye" || c === "turkiye" ? "tr" : "en";
+  return isDomesticCountry(country) ? "tr" : "en";
 }
 
 /** Firma adını arama sorgusuna çevirir: ünvan ekleri ("San. Tic. Ltd. Şti.", "Inc.", "GmbH") aramayı bozar, atılır */

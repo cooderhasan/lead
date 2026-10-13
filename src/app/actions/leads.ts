@@ -234,7 +234,7 @@ export async function bulkLeadsAction(_: ActionState, fd: FormData): Promise<Act
         const campaignId = String(fd.get("campaignId") ?? "");
         if (!campaignId) throw new AppError("VALIDATION", "Kampanya seçin.");
         const r = await addLeadsToCampaign(ctx, campaignId, ids);
-        message = `"${r.campaignName}" kampanyasına ${r.added} firma eklendi${r.skipped ? `, ${r.skipped} atlandı (zaten ekli / engelli / kapanmış)` : ""}${r.noEmail ? ` · ${r.noEmail} firmanın e-postası yok, gönderilemez` : ""}${r.alsoInOther ? ` · DİKKAT: ${r.alsoInOther} firma başka bir açık kampanyada da var` : ""}. Kampanya sayfasında "Mesajları üret" ile devam edin.`;
+        message = `"${r.campaignName}" kampanyasına ${r.added} firma eklendi${r.skipped ? `, ${r.skipped} atlandı (zaten ekli / engelli / kapanmış)` : ""}${r.wrongMarket ? ` · ${r.wrongMarket} firma eklenmedi: bu ${r.market} kampanyası, firmalar başka pazarda` : ""}${r.noEmail ? ` · ${r.noEmail} firmanın e-postası yok, gönderilemez` : ""}${r.alsoInOther ? ` · DİKKAT: ${r.alsoInOther} firma başka bir açık kampanyada da var` : ""}. Kampanya sayfasında "Mesajları üret" ile devam edin.`;
         revalidatePath(`/campaigns/${campaignId}`);
         break;
       }
