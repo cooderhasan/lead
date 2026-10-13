@@ -42,6 +42,12 @@ export const CAMPAIGN_STATUS_LABELS: Record<CampaignStatus, string> = {
   ARCHIVED: "Arşiv",
 };
 
+/** Durum etiketi: gönderimi başlamış ama takip adımı bekleyen kampanya "gönderime hazır" değil, devam ediyordur */
+export function campaignStatusLabel(c: { status: string; startedAt?: Date | null }): string {
+  if (c.status === "READY" && c.startedAt) return "Devam ediyor · takip bekliyor";
+  return CAMPAIGN_STATUS_LABELS[c.status as CampaignStatus] ?? c.status;
+}
+
 export const MESSAGE_STATUS_LABELS: Record<MessageStatus, string> = {
   DRAFT: "Taslak",
   PENDING_APPROVAL: "Onay bekliyor",
@@ -92,13 +98,16 @@ export async function getCampaign(ctx: TenantContext, id: string) {
   return campaign;
 }
 
-export async function listCampaignMessages(ctx: TenantContext, filter: { campaignId?: string; status?: MessageStatus; take?: number } = {}) {
+export async function listCampaignMessages(
+  ctx: TenantContext,
+  filter: { campaignId?: string; status?: MessageStatus | MessageStatus[]; take?: number } = {},
+) {
   assertCan(ctx, "campaign.read");
   return tenantDb(ctx).message.findMany({
     where: {
       direction: "OUTBOUND",
       ...(filter.campaignId ? { campaignId: filter.campaignId } : {}),
-      ...(filter.status ? { status: filter.status } : {}),
+      ...(filter.status ? { status: Array.isArray(filter.status) ? { in: filter.status } : filter.status } : {}),
     },
     orderBy: [{ createdAt: "desc" }],
     take: Math.min(filter.take ?? 100, 300),

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Megaphone, Plus } from "lucide-react";
 import { requireTenantPage } from "@/server/tenancy/context";
 import { can } from "@/server/tenancy/permissions";
-import { CAMPAIGN_STATUS_LABELS, listCampaigns } from "@/server/services/campaigns";
+import { campaignStatusLabel, listCampaigns } from "@/server/services/campaigns";
 import { Badge, Card, EmptyState, LinkButton, PageHeader } from "@/components/ui";
 import { campaignScopeLabel } from "@/lib/market";
 
@@ -48,7 +48,7 @@ export default async function CampaignsPage() {
                 <span className="text-xs text-text-2">{c._count.leads} lead · {c._count.messages} mesaj</span>
                 <span className="text-xs text-text-3">{fmt(c.createdAt)}</span>
                 <Badge tone={c.status === "RUNNING" ? "accent" : c.status === "COMPLETED" ? "success" : c.status === "PAUSED" ? "warning" : "neutral"}>
-                  {CAMPAIGN_STATUS_LABELS[c.status]}
+                  {campaignStatusLabel(c)}
                 </Badge>
               </li>
             ))}

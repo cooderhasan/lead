@@ -13,11 +13,12 @@ import { toMessageCard } from "../campaigns/message-data";
 
 export const metadata: Metadata = { title: "Mesajlar" };
 
-const FILTERS: Array<{ key: string; label: string; status?: MessageStatus }> = [
+const FILTERS: Array<{ key: string; label: string; status?: MessageStatus | MessageStatus[] }> = [
   { key: "inbox", label: "Gelen yanıtlar" },
   { key: "pending", label: "Onay bekleyen", status: "PENDING_APPROVAL" },
   { key: "approved", label: "Onaylı", status: "APPROVED" },
-  { key: "sent", label: "Gönderilen", status: "SENT" },
+  // Teslim bildirimi gelen ileti DELIVERED olur; yine de gönderilmiştir
+  { key: "sent", label: "Gönderilen", status: ["SENT", "DELIVERED"] },
   { key: "bounced", label: "Geri dönen", status: "BOUNCED" },
   { key: "failed", label: "Başarısız", status: "FAILED" },
   { key: "all", label: "Tüm gidenler" },
@@ -94,7 +95,7 @@ export default async function MessagesPage({ searchParams }: { searchParams: Pro
           {messages.length === 0 ? (
             <EmptyState
               icon={<Mail className="size-8" />}
-              title={`${active.status ? MESSAGE_STATUS_LABELS[active.status] : "Hiç"} mesaj yok`}
+              title={`${Array.isArray(active.status) ? active.label : active.status ? MESSAGE_STATUS_LABELS[active.status] : "Hiç"} mesaj yok`}
               description="Mesajlar kampanya ekranında, strateji onaylandıktan sonra üretilir."
             />
           ) : (

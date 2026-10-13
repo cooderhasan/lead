@@ -3,7 +3,7 @@ import Link from "next/link";
 import { requireTenantPage } from "@/server/tenancy/context";
 import { getAnalytics } from "@/server/services/analytics";
 import { REPLY_CATEGORY_LABELS } from "@/server/services/conversations";
-import { CAMPAIGN_STATUS_LABELS } from "@/server/services/campaigns";
+import { campaignStatusLabel } from "@/server/services/campaigns";
 import { LOST_REASON_LABELS } from "@/server/services/crm";
 import { Card, CardBody, CardHeader, EmptyState, PageHeader, Stat } from "@/components/ui";
 import { cn, formatNumber } from "@/lib/cn";
@@ -173,7 +173,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
                     {a.campaigns.map((c) => (
                       <tr key={c.id}>
                         <td className="px-5 py-2.5"><Link href={`/campaigns/${c.id}`} className="font-medium text-text hover:text-accent">{c.name}</Link></td>
-                        <td className="px-3 py-2.5 text-text-2">{CAMPAIGN_STATUS_LABELS[c.status as keyof typeof CAMPAIGN_STATUS_LABELS]}</td>
+                        <td className="px-3 py-2.5 text-text-2">{campaignStatusLabel(c)}</td>
                         <td className="px-3 py-2.5 text-right tabular-nums">{c.leads}</td>
                         <td className="px-3 py-2.5 text-right tabular-nums">{c.sent}</td>
                         <td className="px-3 py-2.5 text-right tabular-nums">{c.replies}</td>

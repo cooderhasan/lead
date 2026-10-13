@@ -48,6 +48,7 @@ export interface AnalyticsSnapshot {
     id: string;
     name: string;
     status: string;
+    startedAt: Date | null;
     leads: number;
     sent: number;
     replies: number;
@@ -103,7 +104,7 @@ export async function getAnalytics(ctx: TenantContext, periodDays = 30): Promise
     db.opportunity.groupBy({ by: ["lostReason"], where: { lostAt: { gte: since } }, _count: { _all: true } }),
     db.campaign.findMany({
       where: { status: { not: "ARCHIVED" }, OR: [{ createdAt: { gte: since } }, { messages: { some: { sentAt: { gte: since } } } }] },
-      select: { id: true, name: true, status: true, _count: { select: { leads: true } } },
+      select: { id: true, name: true, status: true, startedAt: true, _count: { select: { leads: true } } },
       orderBy: { createdAt: "desc" },
       take: 20,
     }),
@@ -165,6 +166,7 @@ export async function getAnalytics(ctx: TenantContext, periodDays = 30): Promise
       id: c.id,
       name: c.name,
       status: c.status,
+      startedAt: c.startedAt,
       leads: c._count.leads,
       sent,
       replies: repliedLeads.length,

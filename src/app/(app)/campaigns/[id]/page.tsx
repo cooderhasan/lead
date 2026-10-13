@@ -6,7 +6,7 @@ import { requireTenantPage } from "@/server/tenancy/context";
 import { can } from "@/server/tenancy/permissions";
 import { isAIConfigured } from "@/server/ai";
 import {
-  CAMPAIGN_STATUS_LABELS,
+  campaignStatusLabel,
   campaignPreview,
   getActiveCampaignJob,
   getCampaign,
@@ -84,7 +84,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
         actions={
           <>
             <Badge tone={campaign.status === "RUNNING" ? "accent" : campaign.status === "COMPLETED" ? "success" : "neutral"} className="self-center">
-              {CAMPAIGN_STATUS_LABELS[campaign.status]}
+              {campaignStatusLabel(campaign)}
             </Badge>
             {canWrite && campaign.status !== "RUNNING" && (
               <form action={archiveCampaignAction}>
@@ -260,7 +260,14 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
               <Stat label="İnceleme gerekli" value={preview.review} />
               <Stat label="Gönderilmez" value={preview.doNotSend} sub={preview.suppressed ? `${preview.suppressed} engelli` : undefined} />
               <Stat label="Yüksek puan (70+)" value={preview.highScore} />
-              <Stat label="Onaylı mesaj" value={preview.messages.APPROVED ?? 0} sub={`${preview.messages.SENT ?? 0} gönderildi`} />
+              <Stat label="Onaylı mesaj" value={preview.messages.APPROVED ?? 0} sub={[
+                  `${(preview.messages.SENT ?? 0) + (preview.messages.DELIVERED ?? 0)} gönderildi`,
+                  preview.messages.DELIVERED && `${preview.messages.DELIVERED} teslim edildi`,
+                  preview.messages.BOUNCED && `${preview.messages.BOUNCED} geri döndü`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              />
             </div>
 
             {!preview.emailConfigured && (
