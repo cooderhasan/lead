@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { searchLangForCountry, websiteQuery } from "@/server/services/lead-intelligence";
-import { isMessageLanguage, languageInstruction } from "@/server/ai/prompts/campaign";
+import { ensureGreeting, isMessageLanguage, languageInstruction } from "@/server/ai/prompts/campaign";
 import { isDomesticCountry, TURKEY_COUNTRY_VARIANTS } from "@/lib/market";
 import { isNonCompanyHost } from "@/server/providers/lead-source/apify-web";
 import { __setRendererForTests } from "@/server/providers/render";
@@ -68,6 +68,13 @@ describe("kampanya dili", () => {
     expect(isMessageLanguage("en")).toBe(true);
     expect(isMessageLanguage("de")).toBe(false);
     expect(isMessageLanguage(null)).toBe(false);
+  });
+
+  it("selamlama atlanmışsa dilin selamlaması eklenir; varsa dokunulmaz", () => {
+    expect(ensureGreeting("Aktif Yay olarak yay üretiyoruz.", "tr")).toBe("Merhaba,\n\nAktif Yay olarak yay üretiyoruz.");
+    expect(ensureGreeting("We manufacture springs.", "en")).toBe("Hello,\n\nWe manufacture springs.");
+    expect(ensureGreeting("Merhaba Ahmet,\n\nMetin", "tr")).toBe("Merhaba Ahmet,\n\nMetin");
+    expect(ensureGreeting("  Sayın Yetkili,\nMetin", "tr")).toBe("Sayın Yetkili,\nMetin");
   });
 });
 

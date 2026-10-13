@@ -92,6 +92,15 @@ export function isMessageLanguage(v: unknown): v is MessageLanguage {
   return v === "tr" || v === "en";
 }
 
+const GREETING_START = /^(merhaba|sayın|iyi günler|selamlar|selam|hello|hi|dear|good (morning|afternoon|day))\b/i;
+
+/** Model selamlamayı atladıysa gövdenin başına dilin selamlamasını ekler. Saf fonksiyon. */
+export function ensureGreeting(body: string, lang: MessageLanguage): string {
+  const text = body.trim();
+  if (GREETING_START.test(text)) return text;
+  return `${lang === "en" ? "Hello," : "Merhaba,"}\n\n${text}`;
+}
+
 /**
  * Prompt'a eklenen dil talimatı. Selamlama kalıbı dile göre değişir; her iki dilde de
  * cinsiyet varsayımı yapılmaz (Bay/Bayan, Mr./Ms. yazılmaz).

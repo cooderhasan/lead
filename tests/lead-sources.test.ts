@@ -218,11 +218,20 @@ describe("yapılandırılmış liste (DataTables)", () => {
     expect(mapStructuredRecords([{ foo: "x", bar: "y" }], null)).toBeNull();
   });
 
+  it("ad başındaki parsel notu atılır; sade ad alanı varsa o kullanılır", () => {
+    const withSingle = mapStructuredRecords([{ company_name: "(Ön Tahsisli) 5k Metal Ltd.", sector_name: "Metal", single_company_name: "5k Metal Ltd." }], null)!;
+    expect(withSingle.leads[0]!.companyName).toBe("5k Metal Ltd.");
+    const prefixed = mapStructuredRecords([{ company_name: "(Kiracı) Akış Asansör A.Ş.", sector_name: "Asansör" }], null)!;
+    expect(prefixed.leads[0]!.companyName).toBe("Akış Asansör A.Ş.");
+  });
+
   it("anahtar kelime filtresi sektörde veya adda arar (Türkçe harf farkı gözetmez)", () => {
     const { leads } = mapStructuredRecords(parseDataTableJson(DT_JSON)!, null)!;
     expect(parseListFilter("otomotiv, MAKİNA;  x ")).toEqual(["otomotiv", "MAKİNA"]);
     expect(applyListFilter(leads, parseListFilter("otomotiv, makina")).map((l) => l.companyName)).toEqual(["Acv Süspansiyon Sistemleri A.Ş.", "Yıldız Makina"]);
     expect(applyListFilter(leads, [])).toHaveLength(3);
+    // "makine" yazımı "Makina" sektörünü de bulur
+    expect(applyListFilter(leads, ["makine"]).map((l) => l.companyName)).toEqual(["Yıldız Makina"]);
   });
 
   it("uçtan uca: veri kaynağından AI kullanılmadan içe aktarılır, filtre uygulanır, kredi iade edilir", async () => {

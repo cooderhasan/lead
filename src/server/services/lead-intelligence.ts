@@ -978,9 +978,11 @@ export function parseListFilter(input: string | null | undefined): string[] {
 /** Filtre verildiyse yalnızca sektöründe veya adında kelimelerden biri geçen firmalar (Türkçe harf farkı gözetilmez) */
 export function applyListFilter(leads: RawLead[], filter: string[]): RawLead[] {
   if (!filter.length) return leads;
-  const words = filter.map(normalizeForMatch).filter(Boolean);
+  // "makine" / "makina" iki yazım da yaygın: aynı sayılır
+  const norm = (s: string) => normalizeForMatch(s).replace(/makine/g, "makina");
+  const words = filter.map(norm).filter(Boolean);
   return leads.filter((l) => {
-    const hay = normalizeForMatch(`${l.category ?? ""} ${l.companyName}`);
+    const hay = norm(`${l.category ?? ""} ${l.companyName}`);
     return words.some((w) => hay.includes(w));
   });
 }
@@ -1012,14 +1014,16 @@ const stripTags = (v: unknown): string | null => {
 export function mapStructuredRecords(records: Array<Record<string, unknown>>, sourceUrl: string | null) {
   const keys = Object.keys(records[0] ?? {});
   const pick = (field: keyof typeof FIELD_KEYS) => keys.find((k) => FIELD_KEYS[field].test(k.replace(/[\s-]/g, "_")));
-  const k = { name: pick("name"), phone: pick("phone"), email: pick("email"), website: pick("website"), sector: pick("sector"), address: pick("address"), city: pick("city"), district: pick("district") };
+  // Bazı listeler adın sade halini ayrıca verir ("(Ön Tahsisli) X A.Ş." yerine "X A.Ş.")
+  const k = { name: keys.find((key) => /^single_?company_?name$/i.test(key)) ?? pick("name"), phone: pick("phone"), email: pick("email"), website: pick("website"), sector: pick("sector"), address: pick("address"), city: pick("city"), district: pick("district") };
   if (!k.name) return null;
 
   const seen = new Set<string>();
   const leads: RawLead[] = [];
   let dropped = 0;
   for (const r of records) {
-    const name = stripTags(r[k.name]);
+    // Ad başındaki parsel / durum notu firma adı değildir: "(Ön Tahsisli) X A.Ş." → "X A.Ş."
+    const name = stripTags(r[k.name])?.replace(/^\([^)]{1,40}\)\s*/, "") || null;
     const key = name ? normalizeForMatch(name) : "";
     if (!name || key.length < 2 || seen.has(key)) {
       dropped++;
