@@ -38,7 +38,7 @@ export function buildEmailContent(body: string, sender: SenderSettings, unsubscr
   const html = `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.55;color:#222">${escapeHtml(body.trim())
     .split(/\n{2,}/)
     .map((p) => `<p style="margin:0 0 12px">${p.replace(/\n/g, "<br>")}</p>`)
-    .join("")}<p style="margin:20px 0 0;color:#555">--<br>${footerLines.map(escapeHtml).join("<br>")}</p><p style="margin:16px 0 0;font-size:12px;color:#888">Bu ileti ${escapeHtml(sender.legalName)} tarafından ticari amaçla gönderilmiştir. <a href="${escapeHtml(unsubscribe)}" style="color:#888">E-posta almayı durdur</a></p></div>`;
+    .join("")}<p style="margin:20px 0 0;color:#555">--<br>${footerLines.map((l) => escapeHtml(l.trim()).replace(/\r?\n/g, "<br>")).join("<br>")}</p><p style="margin:16px 0 0;font-size:12px;color:#888">Bu ileti ${escapeHtml(sender.legalName)} tarafından ticari amaçla gönderilmiştir. <a href="${escapeHtml(unsubscribe)}" style="color:#888">E-posta almayı durdur</a></p></div>`;
   return { text, html };
 }
 

@@ -104,6 +104,12 @@ describe("e-posta alt bilgisi ve ret bağlantısı", () => {
     expect(c.html).toContain('href="https://x/u/abc"');
   });
 
+  it("çok satırlı imza HTML'de satır satır kalır", () => {
+    const sender = { fromName: "Ahmet", fromEmail: "ahmet@aktifyay.net", replyTo: null, legalName: "Aktif Yay San. Ltd. Şti.", postalAddress: "Nilüfer / Bursa", phone: null, signature: "Ahmet Yılmaz\r\nAktif Yay\nwww.aktifyay.com.tr" };
+    const c = buildEmailContent("Merhaba", sender, "https://x/u/abc");
+    expect(c.html).toContain("Ahmet Yılmaz<br>Aktif Yay<br>www.aktifyay.com.tr");
+  });
+
   it("imzalı token doğrulanır; değiştirilmiş token reddedilir", () => {
     const t = unsubscribeToken("cmpany0000001", "message000001");
     expect(verifyUnsubscribeToken(t)).toEqual({ companyId: "cmpany0000001", messageId: "message000001" });
