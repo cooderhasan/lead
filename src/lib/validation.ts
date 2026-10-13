@@ -233,6 +233,10 @@ export const campaignCreateSchema = z.object({
   maxLeads: z.preprocess((v) => (v === "" || v == null ? undefined : Number(v)), z.number().int().min(1).max(500).optional()),
   /** Mesaj dili — yurt dışı kampanyalarda AI İngilizce yazar */
   language: z.preprocess((v) => (v === "" || v == null ? undefined : v), z.enum(["tr", "en"]).optional()),
+  /** Yalnızca bu listedeki lead'ler (ör. "Konya OSB" içe aktarımı) */
+  listId: z.preprocess((v) => (v === "" || v == null ? undefined : v), z.string().min(1).max(40).optional()),
+  /** Yalnızca bu şehirdeki lead'ler */
+  city: z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), z.string().trim().min(2).max(120).optional()),
 });
 
 export const manualReplySchema = z.object({

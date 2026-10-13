@@ -5,6 +5,7 @@ import { requireTenantPage } from "@/server/tenancy/context";
 import { can } from "@/server/tenancy/permissions";
 import { CAMPAIGN_STATUS_LABELS, listCampaigns } from "@/server/services/campaigns";
 import { Badge, Card, EmptyState, LinkButton, PageHeader } from "@/components/ui";
+import { campaignScopeLabel } from "@/lib/market";
 
 export const metadata: Metadata = { title: "Kampanyalar" };
 
@@ -42,7 +43,7 @@ export default async function CampaignsPage() {
               <li key={c.id} className="flex flex-wrap items-center gap-3 px-5 py-4">
                 <div className="min-w-0 flex-1">
                   <Link href={`/campaigns/${c.id}`} className="font-medium text-text hover:text-accent">{c.name}</Link>
-                  <p className="truncate text-xs text-text-3">{c.targetDescription}</p>
+                  <p className="truncate text-xs text-text-3">{campaignScopeLabel(c)} · {c.targetDescription}</p>
                 </div>
                 <span className="text-xs text-text-2">{c._count.leads} lead · {c._count.messages} mesaj</span>
                 <span className="text-xs text-text-3">{fmt(c.createdAt)}</span>

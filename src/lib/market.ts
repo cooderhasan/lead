@@ -11,6 +11,18 @@ export const TURKEY_COUNTRY_VARIANTS = [
 /** Lead yurt içi mi? Ülke boşsa Türkiye varsayılır (ana pazar). */
 export function isDomesticCountry(country?: string | null): boolean {
   // "TÜRKİYE".toLowerCase() → "türki̇ye" (birleşik nokta): nokta atılır
-  const c = (country ?? "").trim().toLowerCase().replace(/̇/g, "");
+  const c = (country ?? "").trim().toLowerCase().replace(/\u0307/g, "");
   return !c || TURKEY_NAMES.includes(c);
+}
+
+/** Kampanyanın hedef kapsamı (pazar · liste · şehir) — listede ve ayrıntıda gösterilir */
+export function campaignScopeLabel(c: { language: string; filters: unknown }): string {
+  const f = (c.filters ?? {}) as { listName?: unknown; city?: unknown };
+  return [
+    c.language === "en" ? "Yurt dışı" : "Yurt içi",
+    typeof f.listName === "string" && `Liste: ${f.listName}`,
+    typeof f.city === "string" && `Şehir: ${f.city}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }

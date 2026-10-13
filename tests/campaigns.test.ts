@@ -467,6 +467,26 @@ describe("kampanya akışı", () => {
     await addLead(a.companyId, "L", { genericEmail: "info@l.com" });
     await expect(createCampaign(a, { name: "X", targetDescription: "hedef açıklaması", productIds: [pending.id] })).rejects.toThrow(/onaylı ürün/);
   });
+
+  it("kampanya pazara, listeye ve şehre göre lead seçer; diğerleri karışmaz", async () => {
+    const a = await setupSeller();
+    const konya = await addLead(a.companyId, "Konya Makina", { city: "Konya", country: "TR" });
+    const ankara = await addLead(a.companyId, "Ankara Makina", { city: "Ankara", country: "Türkiye" });
+    const abroad = await addLead(a.companyId, "Baumann GmbH", { city: "Stuttgart", country: "DE" });
+    const list = await rawDb.leadList.create({ data: { companyId: a.companyId, name: "Konya OSB", kind: "IMPORT" } });
+    await rawDb.leadListItem.create({ data: { companyId: a.companyId, listId: list.id, leadId: konya } });
+
+    const leadsOf = async (id: string) => (await rawDb.campaignLead.findMany({ where: { campaignId: id } })).map((l) => l.leadId).sort();
+    const tr = await createCampaign(a, { name: "TR", targetDescription: "yurt içi hedef", productIds: [] });
+    expect(await leadsOf(tr.id)).toEqual([ankara, konya].sort());
+    const en = await createCampaign(a, { name: "EN", targetDescription: "yurt dışı hedef", productIds: [], language: "en" });
+    expect(await leadsOf(en.id)).toEqual([abroad]);
+    const byList = await createCampaign(a, { name: "Liste", targetDescription: "Konya OSB hedef", productIds: [], listId: list.id });
+    expect(await leadsOf(byList.id)).toEqual([konya]);
+    expect(byList.filters).toMatchObject({ listName: "Konya OSB" });
+    const byCity = await createCampaign(a, { name: "Şehir", targetDescription: "Konya hedef", productIds: [], city: "konya" });
+    expect(await leadsOf(byCity.id)).toEqual([konya]);
+  });
 });
 
 describe("ret ve sağlayıcı olayları", () => {

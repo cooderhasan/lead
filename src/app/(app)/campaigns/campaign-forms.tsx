@@ -11,7 +11,13 @@ import {
 import { ActionForm, FormMessage, SubmitButton } from "@/components/forms";
 import { Badge, Button, Field, Input, Select, Textarea } from "@/components/ui";
 
-export function CampaignCreateForm({ products }: { products: Array<{ id: string; name: string }> }) {
+export function CampaignCreateForm({
+  products,
+  lists,
+}: {
+  products: Array<{ id: string; name: string }>;
+  lists: Array<{ id: string; name: string; count: number }>;
+}) {
   return (
     <ActionForm action={createCampaignAction}>
       {(state) => (
@@ -61,6 +67,17 @@ export function CampaignCreateForm({ products }: { products: Array<{ id: string;
                 <option value="tr">Türkçe</option>
                 <option value="en">İngilizce</option>
               </Select>
+            </Field>
+            <Field label="Lead listesi (isteğe bağlı)" htmlFor="listId" hint="Seçilirse yalnızca bu listedeki firmalar alınır (ör. Konya OSB aktarımı)." error={state.fieldErrors?.listId}>
+              <Select id="listId" name="listId" defaultValue="">
+                <option value="">Tüm lead&apos;ler</option>
+                {lists.map((l) => (
+                  <option key={l.id} value={l.id}>{l.name} ({l.count})</option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Şehir (isteğe bağlı)" htmlFor="city" hint="Yazılırsa yalnızca bu şehirdeki firmalar alınır." error={state.fieldErrors?.city}>
+              <Input id="city" name="city" maxLength={120} placeholder="ör. Konya" />
             </Field>
           </div>
           <SubmitButton pendingText="Lead'ler ve uyum kontrol ediliyor…" className="self-start">Kampanya oluştur</SubmitButton>

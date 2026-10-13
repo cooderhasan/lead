@@ -30,6 +30,7 @@ import { Alert, Badge, Button, Card, CardBody, CardHeader, EmptyState, PageHeade
 import { isAppError } from "@/lib/errors";
 import { COMPLIANCE_LABELS } from "@/lib/compliance";
 import { scoreTone } from "@/lib/lead-scoring";
+import { campaignScopeLabel } from "@/lib/market";
 import { MessageCard, StrategyApproveForm } from "../campaign-forms";
 import { toMessageCard } from "../message-data";
 
@@ -79,7 +80,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
       </Link>
       <PageHeader
         title={campaign.name}
-        description={campaign.targetDescription}
+        description={[campaign.targetDescription, campaignScopeLabel(campaign)].filter(Boolean).join(" · ")}
         actions={
           <>
             <Badge tone={campaign.status === "RUNNING" ? "accent" : campaign.status === "COMPLETED" ? "success" : "neutral"} className="self-center">

@@ -138,12 +138,17 @@ export async function createCampaign(ctx: TenantContext, input: z.infer<typeof c
 
   const minScore = input.minScore ?? DEFAULT_MIN_SCORE;
   const language = input.language ?? "tr";
+  const list = input.listId ? await db.leadList.findUnique({ where: { id: input.listId }, select: { id: true, name: true } }) : null;
+  if (input.listId && !list) throw new AppError("VALIDATION", "Seçilen liste bulunamadı.", { listId: "Geçersiz liste" });
+  const city = input.city?.trim();
   const leads = await db.lead.findMany({
     where: {
       fitScore: { gte: minScore },
       suppressed: false,
       status: { notIn: [...EXCLUDED_LEAD_STATUSES] },
       AND: [leadMarketWhere(language)],
+      ...(list ? { lists: { some: { listId: list.id } } } : {}),
+      ...(city ? { city: { equals: city, mode: "insensitive" as const } } : {}),
     },
     orderBy: { fitScore: "desc" },
     take: input.maxLeads ?? DEFAULT_MAX_LEADS,
@@ -152,7 +157,7 @@ export async function createCampaign(ctx: TenantContext, input: z.infer<typeof c
   if (leads.length === 0) {
     throw new AppError(
       "VALIDATION",
-      `Puanı ${minScore} ve üzeri olan uygun ${marketLabel(language)} lead yok (kampanya dili ${language === "en" ? "İngilizce" : "Türkçe"} olduğu için yalnızca ${marketLabel(language)} firmalar seçilir). Önce Leads ekranında lead bulup puanlayın veya eşiği düşürün.`,
+      `Puanı ${minScore} ve üzeri olan uygun ${marketLabel(language)} lead yok${list ? ` ("${list.name}" listesinde)` : ""}${city ? ` (${city})` : ""}. Kampanya dili ${language === "en" ? "İngilizce" : "Türkçe"} olduğu için yalnızca ${marketLabel(language)} firmalar seçilir. Önce Leads ekranında lead bulup puanlayın, filtreleri gevşetin veya eşiği düşürün.`,
       { minScore: "Uygun lead yok" },
     );
   }
@@ -163,7 +168,12 @@ export async function createCampaign(ctx: TenantContext, input: z.infer<typeof c
       name: input.name,
       targetDescription: input.targetDescription,
       language,
-      filters: { minScore, maxLeads: input.maxLeads ?? DEFAULT_MAX_LEADS } as Prisma.InputJsonValue,
+      filters: {
+        minScore,
+        maxLeads: input.maxLeads ?? DEFAULT_MAX_LEADS,
+        ...(list ? { listId: list.id, listName: list.name } : {}),
+        ...(city ? { city } : {}),
+      } as Prisma.InputJsonValue,
       createdById: ctx.userId,
       products: { connect: products.map((p) => ({ id: p.id })) },
     },
