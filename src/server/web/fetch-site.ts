@@ -479,28 +479,38 @@ export async function fetchListPage(
   if (!isAllowedByRobots(start.pathname + start.search, disallowed)) {
     throw new FetchBlockedError("Bu sayfa robots.txt ile otomatik okumaya kapalı. Listeyi kopyalayıp metin olarak yapıştırabilirsiniz.");
   }
-  // Satırları JavaScript ile yükleyen sayfalar (fuar katılımcı listeleri) sunucudan boş gelir:
-  // istenirse sayfa gerçek tarayıcıda açtırılır. robots.txt kontrolü yukarıda zaten yapıldı.
-  if (opts.render) {
-    const text = await getPageRenderer().render(start.toString());
-    return { finalUrl: start.toString(), text, records: null, rendered: true };
+  let page: Awaited<ReturnType<typeof safeFetch>> | null = null;
+  try {
+    page = await safeFetch(start, { ...opts, timeoutMs: 20_000 });
+    if (page.status >= 400 || !page.body) throw new Error(`Sayfa açılamadı (HTTP ${page.status}).`);
+  } catch (err) {
+    // Tarayıcıyla açılacaksa düz istek hatası engel değil
+    if (!opts.render || err instanceof FetchBlockedError) throw err;
+    page = null;
   }
 
-  const page = await safeFetch(start, { ...opts, timeoutMs: 20_000 });
-  if (page.status >= 400 || !page.body) throw new Error(`Sayfa açılamadı (HTTP ${page.status}).`);
-
   // Tablo satırları sonradan JavaScript ile (DataTables) yükleniyorsa veriyi kaynağından al:
-  // yalnızca aynı site, robots.txt izin veriyorsa, tek istek.
+  // yalnızca aynı site, robots.txt izin veriyorsa, tek istek. Tüm sayfalar (ör. 1.000+ satır) tek seferde gelir;
+  // bu yüzden "tarayıcıyla aç" istense de önce denenir (tarayıcı yalnızca görünen ilk sayfayı okur).
   let records: Array<Record<string, unknown>> | null = null;
-  const source = findDataTableSource(page.body, page.finalUrl);
+  const source = page ? findDataTableSource(page.body, page.finalUrl) : null;
   if (source && isAllowedByRobots(source.pathname + source.search, disallowed)) {
     try {
       const res = await safeFetch(source, { ...opts, json: true, timeoutMs: 30_000 });
       if (res.status < 400 && res.body) records = parseDataTableJson(res.body);
-    } catch {
-      /* veri kaynağı okunamadı → sayfa metniyle devam */
+      if (!records) console.warn(`[list] DataTables kaynağı okunamadı: HTTP ${res.status} ${res.contentType}`);
+    } catch (err) {
+      console.warn("[list] DataTables kaynağı okunamadı:", (err as Error).message);
     }
   }
+
+  // Satırları JavaScript ile yükleyen sayfalar (fuar katılımcı listeleri) sunucudan boş gelir:
+  // istenirse sayfa gerçek tarayıcıda açtırılır. robots.txt kontrolü yukarıda zaten yapıldı.
+  if (opts.render && !records) {
+    const text = await getPageRenderer().render(start.toString());
+    return { finalUrl: start.toString(), text, records: null, rendered: true };
+  }
+  if (!page) throw new Error("Sayfa açılamadı.");
   return { finalUrl: page.finalUrl.toString(), text: htmlToListText(page.body, page.finalUrl), records, rendered: false };
 }
 

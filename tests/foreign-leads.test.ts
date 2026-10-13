@@ -91,6 +91,25 @@ describe("liste sayfasını tarayıcıyla açma", () => {
     }
   });
 
+  it("render seçili olsa da DataTables kaynağı varsa tüm satırlar oradan alınır (tarayıcı yalnızca ilk sayfayı görür)", async () => {
+    const rows = Array.from({ length: 25 }, (_, i) => ({ company_name: `Firma ${i + 1} San. Tic. Ltd. Şti.`, sector_name: "Makina" }));
+    const site = await startSite({
+      "/robots.txt": "User-agent: *\nAllow: /",
+      "/osb": "<html><body><table id='t'></table><script>$('#t').DataTable({ ajax: '/osb-data.json' })</script></body></html>",
+      "/osb-data.json": JSON.stringify({ data: rows }),
+    });
+    const render = vi.fn(async () => "Firma 1 San. Tic. Ltd. Şti.");
+    try {
+      __setRendererForTests({ render });
+      const page = await fetchListPage(`${site.url}/osb`, { allowPrivateHosts: true, render: true });
+      expect(page.rendered).toBe(false);
+      expect(page.records).toHaveLength(25);
+      expect(render).not.toHaveBeenCalled();
+    } finally {
+      site.server.close();
+    }
+  });
+
   it("robots.txt kapalıysa tarayıcıyla da açılmaz", async () => {
     const site = await startSite({
       "/robots.txt": "User-agent: *\nDisallow: /exhibitors",
