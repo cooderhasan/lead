@@ -30,6 +30,7 @@ import { getSenderSettings, senderReadiness } from "./email-settings";
 import type { LeadEnrichment } from "./lead-intelligence";
 import { AppError } from "@/lib/errors";
 import { isDomesticCountry, TURKEY_COUNTRY_VARIANTS } from "@/lib/market";
+import { CONTACT_WINDOW_DAYS } from "@/lib/compliance";
 import type { campaignCreateSchema } from "@/lib/validation";
 
 export const CAMPAIGN_STATUS_LABELS: Record<CampaignStatus, string> = {
@@ -159,6 +160,16 @@ export async function createCampaign(ctx: TenantContext, input: z.infer<typeof c
       AND: [leadMarketWhere(language)],
       ...(list ? { lists: { some: { listId: list.id } } } : {}),
       ...(city ? { city: { equals: city, mode: "insensitive" as const } } : {}),
+      // Yeni kampanyaya yalnızca yazılmamış firmalar: açık bir kampanyada olan veya son 30 günde
+      // ileti gönderilen firma alınmaz (aksi halde aynı yüksek puanlı firmalar her kampanyada yer kaplar)
+      campaignLeads: { none: { campaign: { status: { in: CAMPAIGN_OPEN_STATUSES } } } },
+      messages: {
+        none: {
+          direction: "OUTBOUND",
+          status: { in: ["SENT", "DELIVERED"] },
+          sentAt: { gte: new Date(Date.now() - CONTACT_WINDOW_DAYS * 86_400_000) },
+        },
+      },
     },
     orderBy: { fitScore: "desc" },
     take: input.maxLeads ?? DEFAULT_MAX_LEADS,
@@ -167,7 +178,7 @@ export async function createCampaign(ctx: TenantContext, input: z.infer<typeof c
   if (leads.length === 0) {
     throw new AppError(
       "VALIDATION",
-      `Puanı ${minScore} ve üzeri olan uygun ${marketLabel(language)} lead yok${list ? ` ("${list.name}" listesinde)` : ""}${city ? ` (${city})` : ""}. Kampanya dili ${language === "en" ? "İngilizce" : "Türkçe"} olduğu için yalnızca ${marketLabel(language)} firmalar seçilir. Önce Leads ekranında lead bulup puanlayın, filtreleri gevşetin veya eşiği düşürün.`,
+      `Puanı ${minScore} ve üzeri olan uygun ${marketLabel(language)} lead yok${list ? ` ("${list.name}" listesinde)` : ""}${city ? ` (${city})` : ""}. Kampanya dili ${language === "en" ? "İngilizce" : "Türkçe"} olduğu için yalnızca ${marketLabel(language)} firmalar seçilir; açık bir kampanyada olan veya son ${CONTACT_WINDOW_DAYS} günde yazılan firmalar alınmaz. Önce Leads ekranında lead bulup puanlayın, filtreleri gevşetin veya eşiği düşürün.`,
       { minScore: "Uygun lead yok" },
     );
   }

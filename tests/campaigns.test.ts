@@ -462,7 +462,7 @@ describe("kampanya akışı", () => {
 
   it("uygun lead yoksa kampanya oluşturulmaz; yalnızca onaylı ürün seçilebilir", async () => {
     const a = await setupSeller();
-    await expect(createCampaign(a, { name: "Boş", targetDescription: "hedef açıklaması", productIds: [] })).rejects.toThrow(/uygun lead yok/);
+    await expect(createCampaign(a, { name: "Boş", targetDescription: "hedef açıklaması", productIds: [] })).rejects.toThrow(/uygun yurt içi lead yok/);
     const pending = await rawDb.product.create({ data: { companyId: a.companyId, name: "Onaysız", status: "PENDING", source: "WEBSITE" } });
     await addLead(a.companyId, "L", { genericEmail: "info@l.com" });
     await expect(createCampaign(a, { name: "X", targetDescription: "hedef açıklaması", productIds: [pending.id] })).rejects.toThrow(/onaylı ürün/);
@@ -476,7 +476,12 @@ describe("kampanya akışı", () => {
     const list = await rawDb.leadList.create({ data: { companyId: a.companyId, name: "Konya OSB", kind: "IMPORT" } });
     await rawDb.leadListItem.create({ data: { companyId: a.companyId, listId: list.id, leadId: konya } });
 
-    const leadsOf = async (id: string) => (await rawDb.campaignLead.findMany({ where: { campaignId: id } })).map((l) => l.leadId).sort();
+    // Her kampanya kontrolden sonra arşivlenir: açık kampanyadaki firmalar yeni kampanyaya alınmaz
+    const leadsOf = async (id: string) => {
+      const ids = (await rawDb.campaignLead.findMany({ where: { campaignId: id } })).map((l) => l.leadId).sort();
+      await rawDb.campaign.update({ where: { id }, data: { status: "ARCHIVED" } });
+      return ids;
+    };
     const tr = await createCampaign(a, { name: "TR", targetDescription: "yurt içi hedef", productIds: [] });
     expect(await leadsOf(tr.id)).toEqual([ankara, konya].sort());
     const en = await createCampaign(a, { name: "EN", targetDescription: "yurt dışı hedef", productIds: [], language: "en" });
@@ -486,6 +491,22 @@ describe("kampanya akışı", () => {
     expect(byList.filters).toMatchObject({ listName: "Konya OSB" });
     const byCity = await createCampaign(a, { name: "Şehir", targetDescription: "Konya hedef", productIds: [], city: "konya" });
     expect(await leadsOf(byCity.id)).toEqual([konya]);
+  });
+
+  it("yeni kampanyaya açık kampanyadaki veya son 30 günde yazılan firmalar alınmaz", async () => {
+    const a = await setupSeller();
+    const inOpen = await addLead(a.companyId, "Açık Kampanyadaki", { genericEmail: "info@acik.com" });
+    const first = await createCampaign(a, { name: "İlk", targetDescription: "ilk kampanya hedefi", productIds: [] });
+    expect((await rawDb.campaignLead.findMany({ where: { campaignId: first.id } })).map((l) => l.leadId)).toEqual([inOpen]);
+
+    // İlk kampanya tamamlandı ama firmaya 30 gün içinde yazıldı → yine alınmaz
+    await rawDb.campaign.update({ where: { id: first.id }, data: { status: "COMPLETED" } });
+    await rawDb.message.create({
+      data: { companyId: a.companyId, leadId: inOpen, campaignId: first.id, channel: "EMAIL", direction: "OUTBOUND", toAddress: "info@acik.com", subject: "s", body: "b", status: "DELIVERED", sentAt: new Date() },
+    });
+    const fresh = await addLead(a.companyId, "Yeni Firma", { genericEmail: "info@yeni.com" });
+    const second = await createCampaign(a, { name: "İkinci", targetDescription: "ikinci kampanya hedefi", productIds: [] });
+    expect((await rawDb.campaignLead.findMany({ where: { campaignId: second.id } })).map((l) => l.leadId)).toEqual([fresh]);
   });
 });
 
