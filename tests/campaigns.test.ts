@@ -110,6 +110,18 @@ describe("e-posta alt bilgisi ve ret bağlantısı", () => {
     expect(c.html).toContain("Ahmet Yılmaz<br>Aktif Yay<br>www.aktifyay.com.tr");
   });
 
+  it("alt bilgi iletinin dilinde: varsayılan Türkçe, yurt dışı kampanyada İngilizce", () => {
+    const sender = { fromName: "Ahmet", fromEmail: "ahmet@aktifyay.net", replyTo: null, legalName: "Aktif Yay San. Ltd. Şti.", postalAddress: "Nilüfer / Bursa", phone: null, signature: null };
+    const tr = buildEmailContent("Merhaba", sender, "https://x/u/abc");
+    expect(tr.html).toContain("ticari amaçla gönderilmiştir");
+    expect(tr.html).toContain("E-posta almayı durdur");
+    const en = buildEmailContent("Hello", sender, "https://x/u/abc", "en");
+    expect(en.html).toContain("This message was sent by Aktif Yay San. Ltd. Şti. for business purposes.");
+    expect(en.html).toContain(">Unsubscribe</a>");
+    expect(en.text).toContain("To stop receiving these emails: https://x/u/abc");
+    expect(en.html).not.toContain("gönderilmiştir");
+  });
+
   it("imzalı token doğrulanır; değiştirilmiş token reddedilir", () => {
     const t = unsubscribeToken("cmpany0000001", "message000001");
     expect(verifyUnsubscribeToken(t)).toEqual({ companyId: "cmpany0000001", messageId: "message000001" });

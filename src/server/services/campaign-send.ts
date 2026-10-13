@@ -13,6 +13,7 @@ import { normalizeEmail } from "@/lib/lead-normalize";
 import { findSuppression, refreshLeadCompliance } from "./compliance";
 import { getSenderSettings, type SenderSettings } from "./email-settings";
 import { oneClickUnsubscribeUrl, unsubscribeUrl } from "./unsubscribe";
+import { resolveMessageLanguage, type MessageLanguage } from "./message-language";
 import { scheduleFollowUpsAfterSend } from "./followups";
 import { deliverWhatsApp } from "./whatsapp";
 
@@ -26,19 +27,33 @@ const escapeHtml = (s: string) =>
  * Gönderici kimliği + ret bağlantısı içeren alt bilgi (6563 s.K.: gönderici kimliği ve ret hakkı).
  * Mesaj gövdesine her gönderimde sistem ekler; kullanıcı/AI bunu kaldıramaz.
  */
-export function buildEmailContent(body: string, sender: SenderSettings, unsubscribe: string) {
+const FOOTER_TEXT = {
+  tr: {
+    sentBy: (legalName: string) => `Bu ileti ${legalName} tarafından ticari amaçla gönderilmiştir.`,
+    optOutText: "Almak istemiyorsanız:",
+    optOutLink: "E-posta almayı durdur",
+  },
+  en: {
+    sentBy: (legalName: string) => `This message was sent by ${legalName} for business purposes.`,
+    optOutText: "To stop receiving these emails:",
+    optOutLink: "Unsubscribe",
+  },
+} as const;
+
+export function buildEmailContent(body: string, sender: SenderSettings, unsubscribe: string, lang: MessageLanguage = "tr") {
+  const t = FOOTER_TEXT[lang];
   const footerLines = [
     sender.signature?.trim() || sender.fromName,
     sender.legalName,
     sender.postalAddress,
     sender.phone ?? null,
   ].filter(Boolean) as string[];
-  const legal = `Bu ileti ${sender.legalName} tarafından ticari amaçla gönderilmiştir. Almak istemiyorsanız: ${unsubscribe}`;
+  const legal = `${t.sentBy(sender.legalName)} ${t.optOutText} ${unsubscribe}`;
   const text = `${body.trim()}\n\n--\n${footerLines.join("\n")}\n\n${legal}`;
   const html = `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.55;color:#222">${escapeHtml(body.trim())
     .split(/\n{2,}/)
     .map((p) => `<p style="margin:0 0 12px">${p.replace(/\n/g, "<br>")}</p>`)
-    .join("")}<p style="margin:20px 0 0;color:#555">--<br>${footerLines.map((l) => escapeHtml(l.trim()).replace(/\r?\n/g, "<br>")).join("<br>")}</p><p style="margin:16px 0 0;font-size:12px;color:#888">Bu ileti ${escapeHtml(sender.legalName)} tarafından ticari amaçla gönderilmiştir. <a href="${escapeHtml(unsubscribe)}" style="color:#888">E-posta almayı durdur</a></p></div>`;
+    .join("")}<p style="margin:20px 0 0;color:#555">--<br>${footerLines.map((l) => escapeHtml(l.trim()).replace(/\r?\n/g, "<br>")).join("<br>")}</p><p style="margin:16px 0 0;font-size:12px;color:#888">${escapeHtml(t.sentBy(sender.legalName))} <a href="${escapeHtml(unsubscribe)}" style="color:#888">${t.optOutLink}</a></p></div>`;
   return { text, html };
 }
 
@@ -123,7 +138,7 @@ export async function deliverMessage(
     to: msg.toAddress,
     replyTo: settings.replyTo ?? undefined,
     subject: msg.subject ?? "",
-    ...buildEmailContent(msg.body, settings, unsubscribeUrl(companyId, msg.id)),
+    ...buildEmailContent(msg.body, settings, unsubscribeUrl(companyId, msg.id), await resolveMessageLanguage(companyId, msg)),
     unsubscribeUrl: oneClickUnsubscribeUrl(companyId, msg.id),
     messageId: msg.id,
   };

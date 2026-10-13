@@ -4,6 +4,7 @@ import { env } from "@/server/env";
 import { tenantDb } from "@/server/tenancy/tenant-db";
 import { AppError } from "@/lib/errors";
 import { addSuppression } from "./compliance";
+import { resolveMessageLanguage } from "./message-language";
 
 function secret(): string {
   const s = env().UNSUBSCRIBE_SECRET;
@@ -55,12 +56,15 @@ export async function describeUnsubscribe(token: string) {
   if (!v) return null;
   const db = tenantDb({ companyId: v.companyId });
   const [message, company] = await Promise.all([
-    db.message.findUnique({ where: { id: v.messageId }, select: { toAddress: true } }),
+    db.message.findUnique({ where: { id: v.messageId }, select: { toAddress: true, campaignId: true, conversationId: true } }),
     db.company.findUnique({ where: { id: v.companyId }, select: { name: true } }),
   ]);
   if (!message?.toAddress || !company) return null;
-  const already = await db.suppressionRecord.findFirst({ where: { type: "EMAIL", value: message.toAddress } });
-  return { companyName: company.name, address: message.toAddress, alreadyUnsubscribed: Boolean(already) };
+  const [already, lang] = await Promise.all([
+    db.suppressionRecord.findFirst({ where: { type: "EMAIL", value: message.toAddress } }),
+    resolveMessageLanguage(v.companyId, message),
+  ]);
+  return { companyName: company.name, address: message.toAddress, alreadyUnsubscribed: Boolean(already), lang };
 }
 
 /**
