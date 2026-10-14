@@ -257,6 +257,11 @@ describe("AI hata açıklaması", () => {
     expect(describeProviderError(new AIProviderError('anthropic 401: {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}', "anthropic", 401))).toMatch(/anahtarı geçersiz/);
     expect(describeProviderError(new AIProviderError("anthropic 400: Your credit balance is too low to access the Anthropic API.", "anthropic", 400))).toMatch(/bakiye/);
     expect(describeProviderError(new AIProviderError("anthropic 404: not_found_error model: x", "anthropic", 404))).toMatch(/modeline erişim/);
+    // OpenRouter kredi hataları (402) bakiye mesajına çevrilir, "ulaşılamıyor" denmez
+    expect(describeProviderError(new AIProviderError('openai 402: {"error":{"message":"Insufficient credits"}}', "openai", 402))).toMatch(/bakiye/);
+    expect(
+      describeProviderError(new AIProviderError("openai 402: This request requires more credits, or fewer max_tokens. You requested up to 12000 tokens, but can only afford 3456.", "openai", 402)),
+    ).toMatch(/bakiye/);
     expect(describeProviderError(new AIProviderError("anthropic bağlantı hatası: fetch failed", "anthropic", undefined, true))).toMatch(/ulaşılamıyor/);
   });
 });

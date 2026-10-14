@@ -110,6 +110,18 @@ export interface ExtractInput<T extends z.ZodTypeAny> {
  * - Retry (exponential backoff) + fallback sağlayıcı
  * - Her çağrıyı AIUsageLog'a yazar (companyId, model, token, tahmini maliyet)
  */
+/** Bakiye yüklenecek yer: hatayı veren sağlayıcıya göre (OpenRouter, OPENAI_BASE_URL ile kullanılır) */
+function billingHint(err: unknown): string {
+  const provider = err instanceof AIProviderError ? err.provider : env().AI_PROVIDER;
+  if (provider === "openai") {
+    return /openrouter/i.test(env().OPENAI_BASE_URL ?? "")
+      ? "openrouter.ai → Settings → Credits'ten kredi yükleyin."
+      : "platform.openai.com → Billing'den bakiye yükleyin.";
+  }
+  if (provider === "gemini") return "Google AI Studio → Billing'den faturalandırmayı kontrol edin.";
+  return "console.anthropic.com → Billing'den bakiye yükleyin (Claude.ai aboneliği API bakiyesi sayılmaz).";
+}
+
 /**
  * Sağlayıcı hatasını kullanıcıya anlaşılır Türkçe nedene çevirir. Yapılandırma hataları (geçersiz anahtar,
  * bakiye yok, model erişimi) "birkaç dakika sonra deneyin" ile gizlenmez; ne yapılacağı söylenir.
@@ -117,8 +129,9 @@ export interface ExtractInput<T extends z.ZodTypeAny> {
 export function describeProviderError(err: unknown): string {
   const status = err instanceof AIProviderError ? err.status : undefined;
   const msg = err instanceof Error ? err.message : String(err ?? "");
-  if (/credit balance|insufficient.?(credit|quota|funds)|billing/i.test(msg)) {
-    return "AI sağlayıcı hesabında kullanılabilir bakiye yok. console.anthropic.com → Billing'den bakiye yükleyin (Claude.ai aboneliği API bakiyesi sayılmaz).";
+  // OpenRouter: 402 "Insufficient credits" / "requires more credits, or fewer max_tokens … can only afford N"
+  if (status === 402 || /credit balance|insufficient.?(credit|quota|funds)|more credits|can only afford|billing/i.test(msg)) {
+    return `AI sağlayıcı hesabında yeterli bakiye yok. ${billingHint(err)}`;
   }
   if (status === 401 || /invalid.?x-api-key|authentication_error|invalid api key/i.test(msg)) {
     return "AI API anahtarı geçersiz. Yöneticiniz ANTHROPIC_API_KEY değerini kontrol etmeli (console.anthropic.com → API Keys; başında/sonunda boşluk olmamalı).";
