@@ -81,6 +81,34 @@ describe("kurumsal e-posta seçimi", () => {
     }
   });
 
+  // Aynı ana makinedeki iki site aynı alan adı sayılıp birleşeceğinden iki durum ayrı testte
+  it("yalnızca muhasebe adresi olan firmada sitede daha iyi adres varsa o kaydedilir", async () => {
+    const a = await createTenant("A");
+    const site = await startSite({ "/": `<p>Bize yazın: <a href="mailto:info@127.0.0.1">info</a> · muhasebe@127.0.0.1</p>` });
+    try {
+      const [l] = await leads(a, [{ name: "Daha İyi", website: site.url, email: "muhasebe@127.0.0.1" }]);
+      const res = await findLeadEmails(a.companyId, [l!]);
+      expect(res).toMatchObject({ found: 1, notFound: 0 });
+      expect((await rawDb.lead.findUniqueOrThrow({ where: { id: l } })).genericEmail).toBe("info@127.0.0.1");
+    } finally {
+      site.server.close();
+    }
+  });
+
+  it("sitede daha iyi adres yoksa muhasebe adresi korunur", async () => {
+    const a = await createTenant("A");
+    const site = await startSite({ "/": "<p>Sadece telefon: 0332 111 22 33</p>" });
+    try {
+      const [l] = await leads(a, [{ name: "Yok", website: site.url, email: "muhasebe@127.0.0.1" }]);
+      const res = await findLeadEmails(a.companyId, [l!]);
+      expect(res).toMatchObject({ found: 0, notFound: 1 });
+      expect((await rawDb.lead.findUniqueOrThrow({ where: { id: l } })).genericEmail).toBe("muhasebe@127.0.0.1");
+      expect(res.items[0]!.reason).toMatch(/muhasebe/);
+    } finally {
+      site.server.close();
+    }
+  });
+
   it("toplu e-posta araması yalnızca sitesi olup e-postası eksik lead'leri kuyruğa alır", async () => {
     const a = await createTenant("A");
     const b = await createTenant("B");

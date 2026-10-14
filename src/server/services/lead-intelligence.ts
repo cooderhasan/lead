@@ -32,7 +32,7 @@ import { createLeadList, ensureJobList, saveDiscoveredLeads } from "./leads";
 import { AppError } from "@/lib/errors";
 import { computeReachability, finalizeScore } from "@/lib/lead-scoring";
 import { isDomesticCountry } from "@/lib/market";
-import { extractDomain, isCompanyEmail, isGenericEmail, nameSimilarity, normalizeEmail, normalizePhone, pickCompanyEmail } from "@/lib/lead-normalize";
+import { extractDomain, isBackOfficeEmail, isCompanyEmail, isGenericEmail, nameSimilarity, normalizeEmail, normalizePhone, pickCompanyEmail } from "@/lib/lead-normalize";
 import { checkEmailQuality } from "@/lib/email-quality";
 import { checkMailDomain } from "@/server/providers/email/mx";
 
@@ -602,19 +602,20 @@ export async function getLastLeadJobError(ctx: TenantContext, leadId: string) {
 const EMAIL_DISCOVERY_MAX = 50;
 
 /**
- * Web sitesi olan ama e-postası olmayan lead'lerin sitesini (ana sayfa + iletişim) tarar ve
- * sayfada yazan kurumsal adresi (info@, satinalma@…) kaydeder. AI veya ücretli API kullanmaz → kredi düşmez.
+ * Web sitesi olan ama e-postası olmayan (veya yalnızca muhasebe@ / ik@ gibi arka ofis adresi olan)
+ * lead'lerin sitesini (ana sayfa + iletişim) tarar ve sayfada yazan kurumsal adresi (info@, satinalma@…)
+ * kaydeder. Daha iyisi bulunamazsa arka ofis adresi korunur. AI veya ücretli API kullanmaz → kredi düşmez.
  */
 export async function startEmailDiscovery(ctx: TenantContext, leadIds: string[]) {
   assertCan(ctx, "lead.write");
   const db = tenantDb(ctx);
   const ids = [...new Set(leadIds)].slice(0, 200);
-  const targets = await db.lead.findMany({
-    where: { id: { in: ids }, website: { not: null }, genericEmail: null },
-    select: { id: true },
-    take: EMAIL_DISCOVERY_MAX,
+  const candidates = await db.lead.findMany({
+    where: { id: { in: ids }, website: { not: null } },
+    select: { id: true, genericEmail: true },
   });
-  if (targets.length === 0) throw new AppError("VALIDATION", "Web sitesi olup e-postası eksik lead yok.");
+  const targets = candidates.filter((l) => !l.genericEmail || isBackOfficeEmail(l.genericEmail)).slice(0, EMAIL_DISCOVERY_MAX);
+  if (targets.length === 0) throw new AppError("VALIDATION", "Web sitesi olup e-postası eksik (veya yalnızca muhasebe / İK adresi olan) lead yok.");
   const running = await db.job.findFirst({ where: { type: "lead.find_email", status: { in: ["QUEUED", "RUNNING"] } }, select: { id: true } });
   if (running) throw new AppError("CONFLICT", "E-posta araması zaten sürüyor. Birkaç dakika sonra sayfayı yenileyin.");
 
@@ -642,7 +643,9 @@ export async function findLeadEmails(companyId: string, leadIds: string[], progr
   const items: EmailDiscoveryItem[] = [];
   for (const [i, leadId] of leadIds.entries()) {
     const lead = await db.lead.findUnique({ where: { id: leadId }, select: { id: true, companyName: true, website: true, genericEmail: true } });
-    if (!lead?.website || lead.genericEmail) continue;
+    // Arka ofis adresi (muhasebe@…) olan firmada sitede daha iyi adres aranır; bulunamazsa o adres kalır
+    const backOffice = lead?.genericEmail && isBackOfficeEmail(lead.genericEmail) ? lead.genericEmail : null;
+    if (!lead?.website || (lead.genericEmail && !backOffice)) continue;
     const base = { leadId, name: lead.companyName };
     if (SOCIAL_HOST.test(hostOf(lead.website))) {
       items.push({ ...base, outcome: "notFound", reason: "Web sitesi yerine sosyal medya sayfası kayıtlı; sosyal medya taranmaz." });
@@ -661,9 +664,11 @@ export async function findLeadEmails(companyId: string, leadIds: string[], progr
         continue;
       }
       if (email) {
-        // Bu arada elle girilmiş adres varsa üzerine yazılmaz
-        const res = await db.lead.updateMany({ where: { id: leadId, genericEmail: null }, data: { genericEmail: email } });
+        // Bu arada elle girilmiş adres varsa üzerine yazılmaz (yalnızca boş veya taramadan önceki arka ofis adresi değişir)
+        const res = await db.lead.updateMany({ where: { id: leadId, genericEmail: backOffice }, data: { genericEmail: email } });
         if (res.count) items.push({ ...base, outcome: "found", email });
+      } else if (backOffice) {
+        items.push({ ...base, outcome: "notFound", reason: "Sitede daha uygun adres yok; mevcut muhasebe / İK adresi kullanılmaya devam edecek." });
       } else {
         // E-posta yoksa iletişim formu tek kanal olabilir: adresi kaydedilir, form DOLDURULMAZ
         const formUrl = pickContactFormUrl(crawl.pages);

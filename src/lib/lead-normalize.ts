@@ -67,7 +67,7 @@ const GENERIC_MAILBOXES = new Set([
 
 /** Satış teması için tercih sırası (satın alma en iyisi); İK / muhasebe kutuları hiç seçilmez. */
 const EMAIL_PREFERENCE = ["satinalma", "purchasing", "info", "bilgi", "iletisim", "contact", "satis", "sales", "siparis", "teklif", "genel", "kurumsal", "ihracat", "export", "office", "ofis"];
-const NEVER_PICK = new Set(["ik", "hr", "muhasebe", "admin", "destek", "support"]);
+const NEVER_PICK = new Set(["ik", "hr", "muhasebe", "finans", "finance", "accounting", "fatura", "insankaynaklari", "admin", "destek", "support"]);
 const FREE_MAIL = /^(gmail|googlemail|hotmail|outlook|live|yahoo|yandex|icloud|mail)\.(com|com\.tr|net)$/;
 
 /**
@@ -127,7 +127,7 @@ function sharesCompanyName(local: string, siteToken: string): boolean {
  * Rapor kırılımı: bir iletinin hangi tip adrese gittiği. "info@ kutusuna sekreter bakıp
  * iletmiyor mu?" sorusunun tahminle değil veriyle cevaplanması için kullanılır.
  */
-export type MailboxBucket = "person" | "purchasing" | "info" | "sales" | "contact" | "other";
+export type MailboxBucket = "person" | "purchasing" | "info" | "sales" | "contact" | "backoffice" | "other";
 
 export const MAILBOX_BUCKET_LABELS: Record<MailboxBucket, string> = {
   person: "Kişiye özel",
@@ -135,6 +135,7 @@ export const MAILBOX_BUCKET_LABELS: Record<MailboxBucket, string> = {
   info: "info@ / bilgi@",
   sales: "satis@ / siparis@",
   contact: "iletisim@",
+  backoffice: "muhasebe@ / ik@",
   other: "Diğer",
 };
 
@@ -145,12 +146,22 @@ const BUCKET_OF: Record<string, MailboxBucket> = {
   iletisim: "contact", contact: "contact", hello: "contact", merhaba: "contact",
 };
 
+/** Satın alma kararı vermeyen arka ofis kutuları (muhasebe, finans, İK…) */
+const BACK_OFFICE = /^(muhasebe|finans|finance|accounting|fatura|ik|hr|insankaynaklari)\d*$/;
+
+/** Arka ofis kutusu mu (muhasebe@, ik@…)? Satış e-postası için zayıf adres; sitede daha iyisi aranır. */
+export function isBackOfficeEmail(address: string | null | undefined): boolean {
+  const local = (address ?? "").split("@")[0]?.toLowerCase().replace(/[._-]/g, "") ?? "";
+  return BACK_OFFICE.test(local);
+}
+
 /**
  * `isPersonal`: ileti bir LeadContact'a (kişi) mı gitti — kutu adına bakılmaz, çünkü
  * kişi kaydı varsa adres zaten o kişinindir. Tanınmayan kutu "other" olur (uydurma sınıf yok).
  */
 export function mailboxBucket(address: string | null | undefined, isPersonal: boolean): MailboxBucket {
   if (isPersonal) return "person";
+  if (isBackOfficeEmail(address)) return "backoffice";
   // toLowerCase (toLocaleLowerCase değil): "INFO" tr yerelinde "ınfo" olur ve eşleşmez
   const local = (address ?? "").split("@")[0]?.toLowerCase().replace(/[._-]/g, "") ?? "";
   return BUCKET_OF[local] ?? "other";

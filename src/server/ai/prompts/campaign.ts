@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { mailboxBucket } from "@/lib/lead-normalize";
 
 // ── Kampanya stratejisi ────────────────────────────────────────────────
 
@@ -99,6 +100,31 @@ export function ensureGreeting(body: string, lang: MessageLanguage): string {
   const text = body.trim();
   if (GREETING_START.test(text)) return text;
   return `${lang === "en" ? "Hello," : "Merhaba,"}\n\n${text}`;
+}
+
+export const FORWARD_REQUEST: Record<MessageLanguage, string> = {
+  tr: "Bu konuyla ilgilenen kişi siz değilseniz, e-postamızı satın alma birimine iletebilirseniz çok memnun oluruz.",
+  en: "If you are not the right person for this, I would be grateful if you could forward it to your purchasing team.",
+};
+
+const CLOSING_START = /^(saygılarımla|saygılarımızla|iyi çalışmalar|teşekkürler|teşekkür ederim|best regards|kind regards|regards|sincerely|thank you|thanks)(?=[\s,.!]|$)/i;
+
+/**
+ * Genel kutuya (info@, muhasebe@…) giden iletiye, kapanıştan önce kibar bir "satın almaya iletin" ricası ekler.
+ * Kişiye veya satinalma@ kutusuna gidene eklenmez. AI'ya bırakılmaz: her iletide aynı ve eksiksiz olur. Saf fonksiyon.
+ */
+export function addForwardRequest(body: string, lang: MessageLanguage, recipient: { address: string; isPersonal: boolean }): string {
+  const text = body.trim();
+  const bucket = mailboxBucket(recipient.address, recipient.isPersonal);
+  if (bucket === "person" || bucket === "purchasing") return text;
+  const sentence = FORWARD_REQUEST[lang];
+  if (text.includes(sentence)) return text;
+  const paras = text.split(/\n{2,}/);
+  if (paras.length > 1 && CLOSING_START.test(paras[paras.length - 1]!.trim())) {
+    paras.splice(paras.length - 1, 0, sentence);
+    return paras.join("\n\n");
+  }
+  return `${text}\n\n${sentence}`;
 }
 
 /**

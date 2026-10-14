@@ -1,7 +1,8 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { rawDb } from "@/server/db";
 import { getAnalytics } from "@/server/services/analytics";
-import { mailboxBucket, normalizeCompanyName } from "@/lib/lead-normalize";
+import { isBackOfficeEmail, mailboxBucket, normalizeCompanyName } from "@/lib/lead-normalize";
+import { addForwardRequest, FORWARD_REQUEST } from "@/server/ai/prompts/campaign";
 import type { TenantContext } from "@/server/tenancy/types";
 import { createTenant, resetDb } from "./helpers";
 
@@ -20,6 +21,25 @@ describe("adres kutusu sınıflandırma", () => {
     // Kişi kaydına gönderildiyse adres info@ bile olsa "kişiye özel"
     expect(mailboxBucket("info@firma.com", true)).toBe("person");
     expect(mailboxBucket(null, false)).toBe("other");
+    // Arka ofis kutuları ayrı izlenir
+    expect(mailboxBucket("muhasebe@firma.com", false)).toBe("backoffice");
+    expect(mailboxBucket("Muhasebe2@firma.com", false)).toBe("backoffice");
+    expect(mailboxBucket("ik@firma.com", false)).toBe("backoffice");
+    expect(isBackOfficeEmail("ikbal@firma.com")).toBe(false);
+  });
+
+  it("genel kutuya giden iletiye kapanıştan önce 'satın almaya iletin' ricası eklenir; kişiye / satinalma@ kutusuna eklenmez", () => {
+    const body = "Merhaba,\n\nAktif Yay olarak yay üretiyoruz.\n\nSaygılarımla,";
+    const toMuhasebe = addForwardRequest(body, "tr", { address: "muhasebe@firma.com", isPersonal: false });
+    expect(toMuhasebe).toBe(`Merhaba,\n\nAktif Yay olarak yay üretiyoruz.\n\n${FORWARD_REQUEST.tr}\n\nSaygılarımla,`);
+    // İki kez eklenmez
+    expect(addForwardRequest(toMuhasebe, "tr", { address: "muhasebe@firma.com", isPersonal: false })).toBe(toMuhasebe);
+    // Kapanış yoksa sona eklenir; İngilizce metin
+    expect(addForwardRequest("Hello,\n\nWe make springs.", "en", { address: "info@firma.com", isPersonal: false })).toBe(
+      `Hello,\n\nWe make springs.\n\n${FORWARD_REQUEST.en}`,
+    );
+    expect(addForwardRequest(body, "tr", { address: "satinalma@firma.com", isPersonal: false })).toBe(body);
+    expect(addForwardRequest(body, "tr", { address: "info@firma.com", isPersonal: true })).toBe(body);
   });
 });
 

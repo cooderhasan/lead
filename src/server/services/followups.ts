@@ -5,7 +5,7 @@ import { assertCan } from "@/server/tenancy/permissions";
 import type { TenantContext } from "@/server/tenancy/types";
 import { ai, isAIConfigured } from "@/server/ai";
 import { untrusted } from "@/server/ai/guardrails";
-import { CAMPAIGN_MESSAGE_INSTRUCTIONS, CAMPAIGN_MESSAGE_SHAPE, campaignMessageSchema, campaignStrategySchema, isMessageLanguage, languageInstruction } from "@/server/ai/prompts/campaign";
+import { addForwardRequest, CAMPAIGN_MESSAGE_INSTRUCTIONS, CAMPAIGN_MESSAGE_SHAPE, campaignMessageSchema, campaignStrategySchema, ensureGreeting, isMessageLanguage, languageInstruction } from "@/server/ai/prompts/campaign";
 import { consumeCredits, refundCredits } from "@/server/usage/credits";
 import { audit } from "@/server/audit/audit";
 import { AppError, isAppError } from "@/lib/errors";
@@ -149,13 +149,14 @@ export async function processDueFollowUps(companyId: string, now = new Date()): 
       throw err;
     }
 
+    const lang = isMessageLanguage(f.campaign.language) ? f.campaign.language : "tr";
     try {
       const strategy = campaignStrategySchema.safeParse(f.campaign.strategy);
       const { data } = await ai({ companyId, operation: "followup.draft" }).extract({
         schema: campaignMessageSchema,
         instructions: `${CAMPAIGN_MESSAGE_INSTRUCTIONS}
 
-${languageInstruction(isMessageLanguage(f.campaign.language) ? f.campaign.language : "tr")}
+${languageInstruction(lang)}
 
 BU BİR HATIRLATMA E-POSTASIDIR:
 - Alıcı önceki e-postaya yanıt vermedi. Kısa ve nazik bir hatırlatma yaz (en fazla 80 kelime).
@@ -185,7 +186,7 @@ BU BİR HATIRLATMA E-POSTASIDIR:
           channel: "EMAIL",
           toAddress: f.message.toAddress,
           subject: data.subject.trim(),
-          body: data.body.trim(),
+          body: addForwardRequest(ensureGreeting(data.body, lang), lang, { address: f.message.toAddress, isPersonal: Boolean(f.message.contactId) }),
           status: "PENDING_APPROVAL",
           qualityScore: quality.score,
           qualityNotes: { issues: quality.issues, personalization: data.personalization, blocked: quality.blocked } as unknown as Prisma.InputJsonValue,
