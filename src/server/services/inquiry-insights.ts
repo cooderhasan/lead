@@ -145,6 +145,8 @@ export interface InquiryRunResult {
   skipped: number;
   analyzed: number;
   inquiries: number;
+  /** Kategori eklenmeden önce işlenip yeniden sınıflandırılan talepler */
+  reclassified: number;
   stoppedForCredits: boolean;
 }
 
@@ -166,9 +168,13 @@ export async function runInquiryAnalysis(companyId: string, progress?: (pct: num
   await progress?.(10);
 
   const keyOf = (uid: number) => `${batch.uidValidity}:${uid}`;
-  const done = new Set(
-    (await db.inboundInquiry.findMany({ where: { sourceKey: { in: batch.messages.map((m) => keyOf(m.uid)) } }, select: { sourceKey: true } })).map((r) => r.sourceKey),
-  );
+  const existing = await db.inboundInquiry.findMany({
+    where: { sourceKey: { in: batch.messages.map((m) => keyOf(m.uid)) } },
+    select: { sourceKey: true, isInquiry: true, category: true, status: true },
+  });
+  // Kategori alanı eklenmeden önce işlenen talepler yeniden sınıflandırılır (durumları korunur)
+  const redo = new Map(existing.filter((r) => r.isInquiry && !r.category).map((r) => [r.sourceKey, r.status]));
+  const done = new Set(existing.filter((r) => !redo.has(r.sourceKey)).map((r) => r.sourceKey));
 
   // Firmanın kendi alan adlarından gelenler (kendi gönderdiği teklifler, iç yazışma) talep değildir
   const { settings } = await getSenderSettings(companyId);
@@ -177,7 +183,7 @@ export async function runInquiryAnalysis(companyId: string, progress?: (pct: num
     [cfg.user, settings?.fromEmail, settings?.replyTo].map((a) => a?.split("@")[1]?.toLowerCase()).concat(extractDomain(company?.website ?? "") ?? undefined).filter(Boolean) as string[],
   );
 
-  const result: InquiryRunResult = { read: batch.messages.length, alreadyProcessed: done.size, skipped: 0, analyzed: 0, inquiries: 0, stoppedForCredits: false };
+  const result: InquiryRunResult = { read: batch.messages.length, alreadyProcessed: done.size, skipped: 0, analyzed: 0, inquiries: 0, reclassified: 0, stoppedForCredits: false };
   const skippedRows: Prisma.InboundInquiryCreateManyInput[] = [];
   const candidates: Array<{ sourceKey: string; receivedAt: Date | null; senderDomain: string | null; text: string }> = [];
 
@@ -239,11 +245,26 @@ export async function runInquiryAnalysis(companyId: string, progress?: (pct: num
         senderDomain: g.senderDomain,
         isInquiry,
         ...(isInquiry
-          ? { companyName, sector: it.sector, application: it.application, springTypes: it.springTypes, quantity: it.quantity, city: it.city, country: it.country, evidence }
+          ? {
+              companyName,
+              category: it.category ?? "Diğer",
+              purpose: it.purpose,
+              sector: it.sector,
+              application: it.application,
+              springTypes: it.springTypes,
+              quantity: it.quantity,
+              city: it.city,
+              country: it.country,
+              evidence,
+              status: redo.get(g.sourceKey) ?? "PENDING",
+            }
           : {}),
       });
       if (isInquiry) result.inquiries++;
     }
+    const replaced = rows.map((r) => r.sourceKey).filter((k) => redo.has(k));
+    if (replaced.length) await db.inboundInquiry.deleteMany({ where: { sourceKey: { in: replaced } } });
+    result.reclassified += replaced.length;
     await db.inboundInquiry.createMany({ data: rows, skipDuplicates: true });
     result.analyzed += rows.length;
     await progress?.(20 + Math.round(((i + group.length) / candidates.length) * 80));
@@ -292,10 +313,12 @@ export async function getInquiryReport(ctx: TenantContext) {
     total,
     inquiries: counted.length,
     rejected: inquiries.length - counted.length,
-    bySector: countBy(counted.map((q) => q.sector)),
+    byCategory: countBy(counted.map((q) => q.category ?? "Sınıflandırılmamış")),
+    byPurpose: countBy(counted.map((q) => q.purpose ?? "belirsiz")),
+    serial: counted.filter((q) => q.purpose === "seri üretim").length,
+    maintenance: counted.filter((q) => q.purpose === "bakım-onarım").length,
     bySpringType: countBy(counted.flatMap((q) => q.springTypes)),
     byCity: countBy(counted.map((q) => q.city ?? q.country)),
-    unknownSector: counted.filter((q) => !q.sector).length,
     items: inquiries,
   };
 }

@@ -1545,6 +1545,10 @@ model InboundInquiry {
   /// false → teklif talebi değil (kendi gönderimi, otomatik yanıt, bülten, alakasız yazışma)
   isInquiry    Boolean
   companyName  String?
+  /// Sabit kategori (rapor kırılımı); `sector` AI'ın serbest metin ayrıntısıdır
+  category     String?
+  /// "seri üretim" | "bakım-onarım" | "prototip / proje" | "belirsiz"
+  purpose      String?
   sector       String?
   /// Yayın kullanılacağı ürün / uygulama ("römork askı sistemi", "hidrolik valf")
   application  String?

@@ -93,7 +93,8 @@ export default async function InquiriesPage() {
               {last && (
                 <p className="text-sm text-text-2">
                   Son analiz ({fmt(lastJob!.finishedAt)}): {last.read} ileti okundu, {last.alreadyProcessed} önceden işlenmişti, {last.skipped} ileti (kendi
-                  gönderimleriniz, otomatik yanıtlar, bültenler) atlandı, {last.analyzed} ileti analiz edildi ve {last.inquiries} teklif talebi bulundu.
+                  gönderimleriniz, otomatik yanıtlar, bültenler) atlandı, {last.analyzed} ileti analiz edildi ve {last.inquiries} teklif talebi bulundu
+                  {last.reclassified ? ` (${last.reclassified} eski talep yeniden sınıflandırıldı)` : ""}.
                   {last.stoppedForCredits && " Kredi yetersiz olduğu için yarıda kaldı; kredi yükleyip tekrar başlatın, kaldığı yerden devam eder."}
                 </p>
               )}
@@ -112,10 +113,11 @@ export default async function InquiriesPage() {
         ) : (
           <>
             <Card>
-              <CardBody className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <CardBody className="grid grid-cols-2 gap-4 sm:grid-cols-5">
                 <Stat label="Analiz edilen ileti" value={report.total} />
                 <Stat label="Teklif talebi" value={report.inquiries} />
-                <Stat label="Sektörü belli olmayan" value={report.unknownSector} />
+                <Stat label="Seri üretim" value={report.serial} />
+                <Stat label="Bakım-onarım" value={report.maintenance} />
                 <Stat label="Rapordan çıkarılan" value={report.rejected} />
               </CardBody>
             </Card>
@@ -124,8 +126,16 @@ export default async function InquiriesPage() {
               Bu sayılar AI&apos;ın iletilerden çıkardığı bilgilerdir. Yanlış görünen talebi aşağıdaki listeden &quot;Rapordan çıkar&quot; ile çıkarabilirsiniz.
             </Alert>
 
-            <div className="grid gap-6 lg:grid-cols-3">
-              <Breakdown title="Sektöre göre" rows={report.bySector} empty="Sektör bilgisi çıkarılamadı." />
+            {report.byCategory.some((c) => c.name === "Sınıflandırılmamış") && (
+              <Alert tone="warning">
+                Bazı talepler sektör kategorisi eklenmeden önce analiz edildi. &quot;Teklif taleplerini analiz et&quot;e bir kez daha basın; yalnızca bu talepler
+                yeniden sınıflandırılır.
+              </Alert>
+            )}
+
+            <div className="grid gap-6 lg:grid-cols-2">
+              <Breakdown title="Sektöre göre" rows={report.byCategory} empty="Sektör bilgisi çıkarılamadı." />
+              <Breakdown title="Kullanım amacına göre" rows={report.byPurpose} empty="Kullanım amacı belirtilmemiş." />
               <Breakdown title="Yay tipine göre" rows={report.bySpringType} empty="Yay tipi belirtilmemiş." />
               <Breakdown title="Şehir / ülkeye göre" rows={report.byCity} empty="Konum belirtilmemiş." />
             </div>
@@ -137,13 +147,14 @@ export default async function InquiriesPage() {
                   <li key={q.id} className={q.status === "REJECTED" ? "px-5 py-4 opacity-50" : "px-5 py-4"}>
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-medium text-text">{q.companyName ?? q.senderDomain ?? "Firma adı yok"}</span>
-                      {q.sector && <Badge tone="accent">{q.sector}</Badge>}
+                      {q.category && <Badge tone="accent">{q.category}</Badge>}
+                      {q.purpose && q.purpose !== "belirsiz" && <Badge tone="success">{q.purpose}</Badge>}
                       {q.springTypes.map((t) => <Badge key={t}>{t}</Badge>)}
                       {q.status === "REJECTED" && <Badge tone="warning">Rapordan çıkarıldı</Badge>}
                       <span className="ml-auto text-xs text-text-3">{fmt(q.receivedAt)}</span>
                     </div>
                     <p className="mt-1 text-sm text-text-2">
-                      {[q.application, q.quantity && `${q.quantity}`, q.city ?? q.country].filter(Boolean).join(" · ") || "—"}
+                      {[q.sector, q.application, q.quantity, q.city ?? q.country].filter(Boolean).join(" · ") || "—"}
                     </p>
                     {q.evidence && <p className="mt-1 text-xs italic text-text-3">&ldquo;{q.evidence}&rdquo;</p>}
                     {canReview && (

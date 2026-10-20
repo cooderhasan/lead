@@ -34,9 +34,9 @@ const MESSAGES = [
 // Mesaj 1: gerçek talep. Mesaj 4: talep değil. Mesaj 5: AI firma adını uydurur → kaydedilmez; kanıt metinde var.
 const AI_ANSWER = JSON.stringify({
   items: [
-    { n: 1, isInquiry: true, companyName: "Tarım Mak A.Ş.", sector: "tarım makinaları", application: "ekim makinası tohum bölmesi", springTypes: ["basma"], quantity: "5.000 adet", city: "Konya", country: null, evidence: "5.000 adet basma yay fiyatı rica ediyoruz" },
+    { n: 1, isInquiry: true, companyName: "Tarım Mak A.Ş.", category: "Tarım makinaları", purpose: "seri üretim", sector: "ekim makinası üretimi", application: "ekim makinası tohum bölmesi", springTypes: ["basma"], quantity: "5.000 adet", city: "Konya", country: null, evidence: "5.000 adet basma yay fiyatı rica ediyoruz" },
     { n: 2, isInquiry: false },
-    { n: 3, isInquiry: true, companyName: "Uydurma Hidrolik Ltd.", sector: "hidrolik", application: "valf gövdesi", springTypes: ["çekme"], quantity: null, city: null, country: null, evidence: "çekme yayı ihtiyacımız var" },
+    { n: 3, isInquiry: true, companyName: "Uydurma Hidrolik Ltd.", category: "Hidrolik ve pnömatik", purpose: "listede olmayan amaç", sector: "valf", application: "valf gövdesi", springTypes: ["çekme"], quantity: null, city: null, country: null, evidence: "çekme yayı ihtiyacımız var" },
   ],
 });
 
@@ -132,16 +132,17 @@ describe("teklif kutusu analizi", () => {
     const rows = await rawDb.inboundInquiry.findMany({ where: { companyId: a.companyId }, orderBy: { sourceKey: "asc" } });
     expect(rows).toHaveLength(5);
     const bySource = Object.fromEntries(rows.map((r) => [r.sourceKey, r]));
-    expect(bySource["7:1"]).toMatchObject({ isInquiry: true, companyName: "Tarım Mak A.Ş.", sector: "tarım makinaları", springTypes: ["basma"], senderDomain: "tarimmak.com.tr", status: "PENDING" });
+    expect(bySource["7:1"]).toMatchObject({ isInquiry: true, companyName: "Tarım Mak A.Ş.", category: "Tarım makinaları", purpose: "seri üretim", springTypes: ["basma"], senderDomain: "tarimmak.com.tr", status: "PENDING" });
     expect(bySource["7:2"]).toMatchObject({ isInquiry: false, sector: null });
     expect(bySource["7:3"]).toMatchObject({ isInquiry: false });
     expect(bySource["7:4"]).toMatchObject({ isInquiry: false });
     // İletide geçmeyen firma adı kaydedilmez; kanıt metinde olduğu için talep sayılır
-    expect(bySource["7:5"]).toMatchObject({ isInquiry: true, companyName: null, sector: "hidrolik" });
+    // Liste dışı amaç "belirsiz" olur
+    expect(bySource["7:5"]).toMatchObject({ isInquiry: true, companyName: null, category: "Hidrolik ve pnömatik", purpose: "belirsiz" });
 
     const report = await getInquiryReport(a);
-    expect(report).toMatchObject({ total: 5, inquiries: 2, rejected: 0 });
-    expect(report.bySector.map((s) => s.name)).toEqual(["tarım makinaları", "hidrolik"]);
+    expect(report).toMatchObject({ total: 5, inquiries: 2, rejected: 0, serial: 1, maintenance: 0 });
+    expect(report.byCategory.map((s) => s.name)).toEqual(["Tarım makinaları", "Hidrolik ve pnömatik"]);
     expect((await getLastInquiryAnalysis(a))!.status).toBe("SUCCEEDED");
 
     // İkinci çalıştırma: hepsi işlenmiş → AI ve kredi yok
@@ -158,6 +159,32 @@ describe("teklif kutusu analizi", () => {
     const b = await createTenant("B");
     expect(await getInquiryReport(b)).toMatchObject({ total: 0, inquiries: 0 });
     await expect(setInquiryStatus(b, bySource["7:1"]!.id, "REJECTED")).rejects.toThrow(/bulunamadı/);
+  });
+
+  it("kategori eklenmeden önce işlenen talepler bir sonraki analizde yeniden sınıflandırılır; durum korunur, diğerleri tekrar işlenmez", async () => {
+    const a = await createTenant("Aktif Yay");
+    __setInquiryReaderForTests(fakeReader().factory);
+    await saveInquiryMailbox(a, INPUT);
+    // Eski analizden kalmış kayıtlar: talep (kategorisiz, rapordan çıkarılmış) + talep olmayan
+    await rawDb.inboundInquiry.createMany({
+      data: [
+        { companyId: a.companyId, sourceKey: "7:1", isInquiry: true, sector: "tarım makinaları", evidence: "x", status: "REJECTED" },
+        { companyId: a.companyId, sourceKey: "7:4", isInquiry: false },
+        { companyId: a.companyId, sourceKey: "7:5", isInquiry: true, category: "Hidrolik ve pnömatik", evidence: "çekme yayı ihtiyacımız var" },
+      ],
+    });
+    const ai = new MockAIProvider(() => AI_ANSWER);
+    __setAIProviderForTests(ai);
+    await startInquiryAnalysis(a);
+    await drainInlineJobs();
+
+    // Yalnızca 7:1 (yeniden) AI'ya gitti; 7:4 ve 7:5 tekrar işlenmedi
+    expect(ai.calls).toHaveLength(1);
+    expect(JSON.stringify(ai.calls[0]!.messages)).not.toContain("Valf gövdemiz");
+    const row = await rawDb.inboundInquiry.findFirstOrThrow({ where: { companyId: a.companyId, sourceKey: "7:1" } });
+    expect(row).toMatchObject({ category: "Tarım makinaları", purpose: "seri üretim", status: "REJECTED" });
+    expect(await rawDb.inboundInquiry.count({ where: { companyId: a.companyId, sourceKey: "7:1" } })).toBe(1);
+    expect((await getLastInquiryAnalysis(a))!.result).toMatchObject({ reclassified: 1 });
   });
 
   it("kanıtı iletide geçmeyen 'talep' kaydedilmez (AI uydurması)", async () => {
