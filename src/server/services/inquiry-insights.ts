@@ -14,6 +14,7 @@ import { consumeCredits, refundCredits } from "@/server/usage/credits";
 import { audit } from "@/server/audit/audit";
 import { AppError, isAppError } from "@/lib/errors";
 import { extractDomain } from "@/lib/lead-normalize";
+import { FREE_MAIL_DOMAINS } from "@/lib/compliance";
 import type { InquiryMailboxInput } from "@/lib/validation";
 import { stripQuotedReply } from "./conversations";
 import { getSenderSettings } from "./email-settings";
@@ -106,7 +107,8 @@ export async function deleteInquiryMailbox(ctx: TenantContext) {
 
 // ── Analiz ─────────────────────────────────────────────────────────────
 
-export async function startInquiryAnalysis(ctx: TenantContext) {
+/** `full`: daha önce analiz edilenler dahil tüm iletiler yeniden analiz edilir ("Rapordan çıkar" işaretleri korunur) */
+export async function startInquiryAnalysis(ctx: TenantContext, opts: { full?: boolean } = {}) {
   assertCan(ctx, "email.settings");
   if (!isAIConfigured()) throw new AppError("AI_UNAVAILABLE", "Analiz için AI gerekli (sunucuda AI yapılandırılmamış).");
   const db = tenantDb(ctx);
@@ -114,8 +116,8 @@ export async function startInquiryAnalysis(ctx: TenantContext) {
   if (!mailbox) throw new AppError("VALIDATION", "Önce teklif kutusunun bağlantı bilgilerini kaydedin.");
   const running = await db.job.findFirst({ where: { type: "inquiry.analyze", status: { in: ["QUEUED", "RUNNING"] } }, select: { id: true } });
   if (running) throw new AppError("CONFLICT", "Analiz zaten sürüyor. Birkaç dakika sonra sayfayı yenileyin.");
-  const jobId = await enqueue("inquiry.analyze", {}, { companyId: ctx.companyId, createdById: ctx.userId, maxAttempts: 1 });
-  await audit({ companyId: ctx.companyId, userId: ctx.userId, action: "inquiry.analysis.started" });
+  const jobId = await enqueue("inquiry.analyze", opts.full ? { full: true } : {}, { companyId: ctx.companyId, createdById: ctx.userId, maxAttempts: 1 });
+  await audit({ companyId: ctx.companyId, userId: ctx.userId, action: "inquiry.analysis.started", metadata: { full: Boolean(opts.full) } });
   return { jobId };
 }
 
@@ -137,7 +139,29 @@ export function isAutomatedMail(headers: Map<string, unknown>, from: string): bo
   return /^(no-?reply|mailer-daemon|postmaster|bounce|notification)/i.test(from.split("@")[0] ?? "");
 }
 
-const norm = (s: string) => s.toLocaleLowerCase("tr").replace(/\s+/g, " ").trim();
+/** Karşılaştırma için sade metin: küçük harf, noktalama / tırnak yok, tek boşluk */
+const norm = (s: string) =>
+  s
+    .toLocaleLowerCase("tr")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+/**
+ * AI'ın verdiği alıntı iletide geçiyor mu? Noktalama / tırnak farkı tolere edilir; birebir yoksa
+ * kelimelerin en az %85'i iletide bulunmalı (en az 4 kelime). Uydurma alıntı bu eşiği geçemez. Saf fonksiyon.
+ */
+export function quoteInText(quote: string | null | undefined, text: string): boolean {
+  if (!quote) return false;
+  const q = norm(quote);
+  const hay = norm(text);
+  if (q.length < 3) return false;
+  if (hay.includes(q)) return true;
+  const words = q.split(" ").filter((w) => w.length >= 3);
+  if (words.length < 4) return false;
+  const have = new Set(hay.split(" "));
+  return words.filter((w) => have.has(w)).length / words.length >= 0.85;
+}
 
 export interface InquiryRunResult {
   read: number;
@@ -151,7 +175,11 @@ export interface InquiryRunResult {
 }
 
 /** İş içinden çağrılır. Daha önce işlenen iletiler atlanır (AI maliyeti tekrarlanmaz). */
-export async function runInquiryAnalysis(companyId: string, progress?: (pct: number) => Promise<void>): Promise<InquiryRunResult> {
+export async function runInquiryAnalysis(
+  companyId: string,
+  progress?: (pct: number) => Promise<void>,
+  opts: { full?: boolean } = {},
+): Promise<InquiryRunResult> {
   const db = tenantDb({ companyId });
   const rec = await db.integration.findFirst({ where: KEY });
   if (!rec?.config || !rec.secretsEncrypted) throw new AppError("VALIDATION", "Teklif kutusu bağlantısı tanımlı değil.");
@@ -172,8 +200,8 @@ export async function runInquiryAnalysis(companyId: string, progress?: (pct: num
     where: { sourceKey: { in: batch.messages.map((m) => keyOf(m.uid)) } },
     select: { sourceKey: true, isInquiry: true, category: true, status: true },
   });
-  // Kategori alanı eklenmeden önce işlenen talepler yeniden sınıflandırılır (durumları korunur)
-  const redo = new Map(existing.filter((r) => r.isInquiry && !r.category).map((r) => [r.sourceKey, r.status]));
+  // Tam analizde hepsi, değilse kategori alanı eklenmeden önce işlenen talepler yeniden analiz edilir (durumları korunur)
+  const redo = new Map(existing.filter((r) => opts.full || (r.isInquiry && !r.category)).map((r) => [r.sourceKey, r.status]));
   const done = new Set(existing.filter((r) => !redo.has(r.sourceKey)).map((r) => r.sourceKey));
 
   // Firmanın kendi alan adlarından gelenler (kendi gönderdiği teklifler, iç yazışma) talep değildir
@@ -204,9 +232,15 @@ export async function runInquiryAnalysis(companyId: string, progress?: (pct: num
       continue;
     }
     const body = stripQuotedReply(parsed.text ?? "").slice(0, BODY_CHARS);
-    candidates.push({ sourceKey, receivedAt, senderDomain, text: redactPersonalData(`Konu: ${parsed.subject ?? ""}\n${body}`) });
+    // Firma alan adı (hidroliksan.com) sektörü gösterebilir; kişisel posta servisleri verilmez
+    const domainLine = senderDomain && !FREE_MAIL_DOMAINS.has(senderDomain) ? `Gönderen alan adı: ${senderDomain}\n` : "";
+    candidates.push({ sourceKey, receivedAt, senderDomain, text: redactPersonalData(`${domainLine}Konu: ${parsed.subject ?? ""}\n${body}`) });
   }
-  if (skippedRows.length) await db.inboundInquiry.createMany({ data: skippedRows, skipDuplicates: true });
+  if (skippedRows.length) {
+    const replacedSkipped = skippedRows.map((r) => r.sourceKey).filter((k) => redo.has(k));
+    if (replacedSkipped.length) await db.inboundInquiry.deleteMany({ where: { sourceKey: { in: replacedSkipped } } });
+    await db.inboundInquiry.createMany({ data: skippedRows, skipDuplicates: true });
+  }
   result.skipped = skippedRows.length;
   await progress?.(20);
 
@@ -234,9 +268,9 @@ export async function runInquiryAnalysis(companyId: string, progress?: (pct: num
       const it = items.find((x) => x.n === idx + 1);
       if (!it) continue; // AI atladı: kaydedilmez, sonraki çalıştırmada tekrar denenir
       const hay = norm(g.text);
-      // Kanıt ve firma adı iletide birebir geçmiyorsa uydurma sayılır, kaydedilmez
-      const evidence = it.evidence && hay.includes(norm(it.evidence)) ? it.evidence : null;
-      const companyName = it.companyName && hay.includes(norm(it.companyName)) ? it.companyName : null;
+      // Kanıt ve firma adı iletide geçmiyorsa uydurma sayılır, kaydedilmez (noktalama farkı tolere edilir)
+      const evidence = quoteInText(it.evidence, g.text) ? it.evidence : null;
+      const companyName = it.companyName && norm(it.companyName).length >= 2 && hay.includes(norm(it.companyName)) ? it.companyName : null;
       const isInquiry = it.isInquiry && Boolean(evidence);
       rows.push({
         companyId,

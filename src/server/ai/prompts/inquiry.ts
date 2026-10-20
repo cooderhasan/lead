@@ -80,10 +80,12 @@ KURALLAR:
   kargo, iş başvurusu, bülten, teşekkür veya genel yazışma ise false (diğer alanlar null).
 - category: firmanın NE ÜRETTİĞİNE / NE İŞ YAPTIĞINA göre şu listeden TAM OLARAK biri:
   ${INQUIRY_CATEGORIES.join(" · ")}
-  İletide, imzada veya firma unvanında faaliyet anlaşılmıyorsa null. Listede uygun yoksa "Diğer".
+  İletide, imzada, firma unvanında veya "Gönderen alan adı" satırında (ör. hidroliksan.com → Hidrolik ve pnömatik,
+  cayirhanenerji.com.tr → Enerji santralleri) faaliyet anlaşılmıyorsa null. Listede uygun yoksa "Diğer".
 - purpose: yay ne için isteniyor?
   "seri üretim": firmanın kendi ürününe takılan parça; tekrarlı / yıllık ihtiyaç veya yüksek adet.
-  "bakım-onarım": tesis, santral, maden, fabrika makinesinde değişim / yedek parça; eski veya deforme numune.
+  "bakım-onarım": tesis, santral, maden, çimento / beton santrali, fabrika veya atölye makinesinde değişim /
+  yedek parça; eski veya deforme numune. Kamu işletmelerinin ve tesislerin malzeme talepleri genelde budur.
   "prototip / proje": numune, test, yeni ürün geliştirme, tek seferlik proje.
   Anlaşılmıyorsa "belirsiz".
 - sector: firmanın faaliyetinin kısa serbest metin ayrıntısı. Firma adından tahmin etme; belirtilmemişse null.

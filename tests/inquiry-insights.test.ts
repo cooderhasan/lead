@@ -9,6 +9,7 @@ import {
   getInquiryReport,
   getLastInquiryAnalysis,
   isAutomatedMail,
+  quoteInText,
   redactPersonalData,
   saveInquiryMailbox,
   setInquiryStatus,
@@ -78,6 +79,15 @@ describe("teklif kutusu: yardımcılar", () => {
     expect(out).toContain("100.000-200.000 adet");
   });
 
+  it("alıntı kontrolü noktalama / tırnak farkını tolere eder, uydurma alıntıyı reddeder", () => {
+    const text = 'Merhaba, "ÇANAK (DİSK) YAY 50x25,4x3x4,1 DIN 2093" 200 ADT için teklifinizi rica ederiz.';
+    expect(quoteInText("ÇANAK (DİSK) YAY 50x25,4x3x4,1 DIN 2093 200 ADT", text)).toBe(true);
+    expect(quoteInText("canak disk yay 50x25 4x3x4 1 din 2093", text)).toBe(false); // ç / ı farkı: birebir değil, kelimeler eksik
+    expect(quoteInText("ÇANAK DİSK YAY 50x25,4x3x4,1 DIN 2093 — 200 ADT için teklifinizi rica ederiz", text)).toBe(true);
+    expect(quoteInText("1 milyon adet kurma yayı için acil teklif istiyoruz", text)).toBe(false);
+    expect(quoteInText(null, text)).toBe(false);
+  });
+
   it("otomatik / toplu iletiler tanınır", () => {
     expect(isAutomatedMail(new Map([["auto-submitted", "auto-replied"]]), "a@b.com")).toBe(true);
     expect(isAutomatedMail(new Map([["list-unsubscribe", "<x>"]]), "a@b.com")).toBe(true);
@@ -127,6 +137,8 @@ describe("teklif kutusu analizi", () => {
     const sent = JSON.stringify(ai.calls[0]!.messages);
     expect(sent).not.toMatch(/0532|ali@tarimmak|Ekte teklifimizi|ofis dışındayım/i);
     expect(sent).toContain("[telefon]");
+    // Firma alan adı sektör ipucu olarak gider
+    expect(sent).toContain("Gönderen alan adı: tarimmak.com.tr");
     expect(await balance(a.companyId)).toBe(before - 1);
 
     const rows = await rawDb.inboundInquiry.findMany({ where: { companyId: a.companyId }, orderBy: { sourceKey: "asc" } });
@@ -185,6 +197,26 @@ describe("teklif kutusu analizi", () => {
     expect(row).toMatchObject({ category: "Tarım makinaları", purpose: "seri üretim", status: "REJECTED" });
     expect(await rawDb.inboundInquiry.count({ where: { companyId: a.companyId, sourceKey: "7:1" } })).toBe(1);
     expect((await getLastInquiryAnalysis(a))!.result).toMatchObject({ reclassified: 1 });
+  });
+
+  it("tümünü yeniden analiz: daha önce işlenenler de yeniden analiz edilir; 'rapordan çıkar' korunur", async () => {
+    const a = await createTenant("Aktif Yay");
+    await rawDb.company.update({ where: { id: a.companyId }, data: { website: "https://www.aktifyay.com.tr" } });
+    __setInquiryReaderForTests(fakeReader().factory);
+    await saveInquiryMailbox(a, INPUT);
+    const ai = new MockAIProvider(() => AI_ANSWER);
+    __setAIProviderForTests(ai);
+    await startInquiryAnalysis(a);
+    await drainInlineJobs();
+    const first = await rawDb.inboundInquiry.findFirstOrThrow({ where: { companyId: a.companyId, sourceKey: "7:1" } });
+    await setInquiryStatus(a, first.id, "REJECTED");
+
+    await startInquiryAnalysis(a, { full: true });
+    await drainInlineJobs();
+    expect(ai.calls).toHaveLength(2);
+    expect(await rawDb.inboundInquiry.count({ where: { companyId: a.companyId } })).toBe(5);
+    expect(await rawDb.inboundInquiry.findFirstOrThrow({ where: { companyId: a.companyId, sourceKey: "7:1" } })).toMatchObject({ isInquiry: true, status: "REJECTED" });
+    expect((await getLastInquiryAnalysis(a))!.result).toMatchObject({ alreadyProcessed: 0, inquiries: 2 });
   });
 
   it("kanıtı iletide geçmeyen 'talep' kaydedilmez (AI uydurması)", async () => {

@@ -3,7 +3,7 @@ import { Inbox } from "lucide-react";
 import { requireTenantPage } from "@/server/tenancy/context";
 import { can } from "@/server/tenancy/permissions";
 import { getInquiryMailbox, getInquiryReport, getLastInquiryAnalysis, type InquiryRunResult } from "@/server/services/inquiry-insights";
-import { deleteInquiryMailboxAction, setInquiryStatusAction } from "@/app/actions/inquiries";
+import { deleteInquiryMailboxAction, setInquiryStatusAction, startInquiryAnalysisAction } from "@/app/actions/inquiries";
 import { JobPoller } from "@/components/job-poller";
 import { ActionButton } from "@/components/action-button";
 import { Alert, Badge, Button, Card, CardBody, CardHeader, EmptyState, PageHeader, Stat } from "@/components/ui";
@@ -87,7 +87,21 @@ export default async function InquiriesPage() {
               {running ? (
                 <JobPoller jobId={lastJob.id} label="Teklif kutusu analiz ediliyor…" />
               ) : (
-                <StartAnalysisButton />
+                <div className="flex flex-wrap items-start gap-3">
+                  <StartAnalysisButton />
+                  {report.total > 0 && (
+                    <ActionButton
+                      action={startInquiryAnalysisAction}
+                      fields={{ full: "1" }}
+                      variant="secondary"
+                      size="md"
+                      pendingText="Başlatılıyor…"
+                      confirm={`Daha önce analiz edilen ${report.total} ileti dahil hepsi yeniden analiz edilecek (yaklaşık ${Math.ceil(report.total / 8)} kredi). "Rapordan çıkar" işaretleri korunur. Devam edilsin mi?`}
+                    >
+                      Tümünü yeniden analiz et
+                    </ActionButton>
+                  )}
+                </div>
               )}
               {lastJob?.status === "FAILED" && <Alert tone="warning">Son analiz tamamlanamadı: {lastJob.error}</Alert>}
               {last && (

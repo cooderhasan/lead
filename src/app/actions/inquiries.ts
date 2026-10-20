@@ -28,10 +28,9 @@ export async function deleteInquiryMailboxAction(fd: FormData) {
 }
 
 export async function startInquiryAnalysisAction(_: ActionState, fd: FormData): Promise<ActionState> {
-  void fd;
   return safeAction(async () => {
     const ctx = await requireTenant();
-    await startInquiryAnalysis(ctx);
+    await startInquiryAnalysis(ctx, { full: fd.get("full") === "1" });
     revalidatePath("/inquiries");
     return { ok: true, message: "Analiz başladı." };
   });
