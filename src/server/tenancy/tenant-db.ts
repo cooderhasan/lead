@@ -24,6 +24,7 @@ export const TENANT_MODELS = new Set<Prisma.ModelName>([
   "KnowledgeChunk",
   "WebsiteAnalysis",
   "Lead",
+  "InboundInquiry",
   "LeadList",
   "LeadListItem",
   "LeadContact",

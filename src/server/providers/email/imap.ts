@@ -84,3 +84,73 @@ export function createImapReader(): MailboxReader {
     },
   };
 }
+
+// ── Firmanın kendi teklif kutusu (yalnızca analiz) ─────────────────────
+
+export interface ImapAccount {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string;
+  mailbox: string;
+}
+
+/** Belirli bir tarihten sonraki iletileri okuyan, salt okunur okuyucu (testlerde sahtesi verilir). */
+export interface MailboxSinceReader {
+  /** Bağlantıyı ve klasörü dener; ileti okumaz */
+  check(): Promise<{ messages: number }>;
+  readSince(since: Date, max: number): Promise<{ uidValidity: bigint; messages: FetchedEmail[] }>;
+}
+
+function connect(acc: ImapAccount) {
+  return new ImapFlow({
+    host: acc.host,
+    port: acc.port,
+    secure: acc.secure,
+    auth: { user: acc.user, pass: acc.pass },
+    logger: false,
+    connectionTimeout: 20_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 60_000,
+    disableAutoIdle: true,
+  });
+}
+
+/**
+ * Posta kutusu SALT OKUNUR (EXAMINE) açılır: okundu işareti konmaz, ileti silinmez/taşınmaz.
+ * Bu okuyucuyla hiçbir zaman ileti gönderilmez.
+ */
+export function createMailboxSinceReader(acc: ImapAccount): MailboxSinceReader {
+  return {
+    async check() {
+      const client = connect(acc);
+      await client.connect();
+      try {
+        const box = await client.mailboxOpen(acc.mailbox, { readOnly: true });
+        return { messages: box.exists };
+      } finally {
+        await client.logout().catch(() => client.close());
+      }
+    },
+    async readSince(since, max) {
+      const client = connect(acc);
+      await client.connect();
+      try {
+        const box = await client.mailboxOpen(acc.mailbox, { readOnly: true });
+        const found = await client.search({ since }, { uid: true });
+        // En yeni iletiler öncelikli
+        const uids = [...new Set(Array.isArray(found) ? found : [])].sort((a, b) => b - a).slice(0, max);
+        const messages: FetchedEmail[] = [];
+        if (uids.length) {
+          for await (const m of client.fetch(uids.join(","), { uid: true, source: { maxLength: MAX_SOURCE_BYTES } }, { uid: true })) {
+            if (m.source) messages.push({ uid: m.uid, source: m.source });
+          }
+        }
+        return { uidValidity: box.uidValidity, messages };
+      } finally {
+        await client.logout().catch(() => client.close());
+      }
+    },
+  };
+}

@@ -8,6 +8,7 @@ import { findEmailsJob } from "./lead-find-email";
 import { findWebsitesJob, onFindWebsiteFailure } from "./lead-find-website";
 import { prepareLeadsJob, onPrepareFailure } from "./lead-prepare";
 import { listImportJob, onListImportFailure } from "./lead-list-import";
+import { inquiryAnalyzeJob } from "./inquiry-analyze";
 import {
   campaignMessagesJob,
   campaignSendJob,
@@ -52,4 +53,5 @@ export const handlers: Registry = {
   "proposal.draft": { run: proposalDraftJob, onFailure: onProposalDraftFailure },
   "competitor.scan": { run: competitorScanJob },
   "webhook.deliver": { run: webhookDeliverJob },
+  "inquiry.analyze": { run: inquiryAnalyzeJob },
 };

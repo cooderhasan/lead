@@ -46,6 +46,8 @@ export interface JobPayloads {
   "proposal.draft": { proposalId: string; usageId?: string };
   /** Rakip sitesi taraması. usageId yoksa (zamanlayıcı) kredi işte düşülür; yetersizse atlanır. */
   "competitor.scan": { competitorId: string; usageId?: string };
+  /** Teklif kutusu analizi (salt okunur IMAP + AI özet; kredi grup başına işte düşülür) */
+  "inquiry.analyze": Record<string, never>;
   /** Giden webhook teslimi (HMAC imzalı; başarısızlıkta tekrar denenir) */
   "webhook.deliver": { endpointId: string; eventId: string; event: string; data: unknown };
 }

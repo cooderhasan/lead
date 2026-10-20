@@ -1,6 +1,6 @@
 export type NavIcon =
   | "LayoutDashboard" | "Sparkles" | "Building2" | "PhoneCall" | "Megaphone" | "Mail" | "KanbanSquare" | "FileText"
-  | "ListChecks" | "Factory" | "Package" | "BookOpen" | "Swords" | "Radar" | "LineChart" | "FileBarChart" | "Settings";
+  | "ListChecks" | "Factory" | "Package" | "BookOpen" | "Swords" | "Radar" | "LineChart" | "FileBarChart" | "Settings" | "Inbox";
 
 export interface NavItem {
   href: string;
@@ -44,6 +44,7 @@ export const NAV_SECTIONS: Array<{ title: string | null; items: NavItem[] }> = [
     title: "Raporlar",
     items: [
       { href: "/analytics", label: "Analitik", icon: "LineChart", phase: 1 },
+      { href: "/inquiries", label: "Teklif talepleri", icon: "Inbox", phase: 1 },
       { href: "/reports", label: "AI raporları", icon: "FileBarChart", phase: 1 },
       { href: "/settings", label: "Ayarlar", icon: "Settings", phase: 1 },
     ],

@@ -9,6 +9,7 @@ import {
   Factory,
   FileBarChart,
   FileText,
+  Inbox,
   KanbanSquare,
   LayoutDashboard,
   LineChart,
@@ -46,6 +47,7 @@ const ICONS: Record<NavIcon, LucideIcon> = {
   LineChart,
   FileBarChart,
   Settings,
+  Inbox,
 };
 
 function NavList({ onNavigate }: { onNavigate?: () => void }) {

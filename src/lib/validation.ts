@@ -211,6 +211,17 @@ export const leadStatusSchema = z.object({
 });
 
 // ── E-posta / kampanya (Faz 3) ──────────────────────────────────────────
+/** Teklif kutusu (yalnızca analiz, salt okunur IMAP). Şifre boşsa kayıtlı şifre korunur. */
+export const inquiryMailboxSchema = z.object({
+  host: z.string().trim().toLowerCase().min(3, "IMAP sunucusu gerekli").max(200).regex(/^[a-z0-9.-]+$/, "Yalnızca sunucu adı (ör. mail.firma.com)"),
+  port: z.coerce.number().int().min(1).max(65535).default(993),
+  secure: z.preprocess((v) => v === "on" || v === "true" || v === true, z.boolean()),
+  user: z.string().trim().min(3, "Kullanıcı adı gerekli").max(200),
+  pass: z.preprocess((v) => (typeof v === "string" ? v : ""), z.string().max(200)),
+  mailbox: z.preprocess((v) => (typeof v === "string" && v.trim() ? v.trim() : "INBOX"), z.string().max(120)),
+});
+export type InquiryMailboxInput = z.infer<typeof inquiryMailboxSchema>;
+
 export const senderSettingsSchema = z.object({
   fromName: z.string().trim().min(2, "Gönderen adı gerekli").max(100),
   fromEmail: z.string().trim().toLowerCase().email("Geçerli bir e-posta girin").max(200),

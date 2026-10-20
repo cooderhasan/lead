@@ -12,6 +12,8 @@ export const CREDIT_COSTS = {
   "lead.list_import": 3,
   "ai.deep_research": 3,
   "ai.message": 1,
+  /** Teklif kutusu analizi — 8 iletilik grup başına */
+  "inquiry.analyze": 1,
   "document.analyze": 5,
   "quotation.generate": 5,
 } as const;
@@ -26,6 +28,7 @@ export const OPERATION_LABELS: Record<string, string> = {
   "lead.list_import": "Listeden içe aktarma",
   "ai.deep_research": "AI derin araştırma",
   "ai.message": "AI mesaj",
+  "inquiry.analyze": "Teklif kutusu analizi",
   "document.analyze": "Doküman analizi",
   "quotation.generate": "Teklif",
   "credit.grant": "Kredi yükleme",

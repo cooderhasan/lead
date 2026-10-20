@@ -452,6 +452,7 @@ model Company {
   jobs               Job[]
   apiKeys            ApiKey[]
   webhookEndpoints   WebhookEndpoint[]
+  inboundInquiries   InboundInquiry[]
 }
 
 model CompanyMember {
@@ -1529,4 +1530,36 @@ model WebhookEndpoint {
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([companyId, active])
+}
+
+/// Firmanın kendi teklif kutusundan (salt okunur IMAP) AI ile çıkarılan talep özeti — YALNIZCA hedefleme analizi.
+/// Kişisel veri tutulmaz: gönderenin yalnızca alan adı; ileti metni saklanmaz (kısa kanıt alıntısı hariç).
+/// Bu kayıtlardan lead oluşturulmaz, e-posta gönderilmez.
+model InboundInquiry {
+  id           String     @id @default(cuid())
+  companyId    String
+  /// Posta kutusu UIDVALIDITY + UID: aynı ileti iki kez işlenmez (tekrar AI maliyeti yok)
+  sourceKey    String
+  receivedAt   DateTime?
+  senderDomain String?
+  /// false → teklif talebi değil (kendi gönderimi, otomatik yanıt, bülten, alakasız yazışma)
+  isInquiry    Boolean
+  companyName  String?
+  sector       String?
+  /// Yayın kullanılacağı ürün / uygulama ("römork askı sistemi", "hidrolik valf")
+  application  String?
+  springTypes  String[]   @default([])
+  quantity     String?
+  city         String?
+  country      String?
+  /// İletiden kısa alıntı (AI çıkarımının kanıtı)
+  evidence     String?
+  /// AI çıkarımı PENDING; kullanıcı yanlış olanı REJECTED yapar (rapordan çıkar)
+  status       FactStatus @default(PENDING)
+  createdAt    DateTime   @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, sourceKey])
+  @@index([companyId, isInquiry])
 }
