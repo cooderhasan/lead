@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { searchLangForCountry, websiteQuery } from "@/server/services/lead-intelligence";
 import { ensureGreeting, isMessageLanguage, languageInstruction } from "@/server/ai/prompts/campaign";
 import { isDomesticCountry, TURKEY_COUNTRY_VARIANTS } from "@/lib/market";
+import { looksLikeSpringMaker } from "@/lib/competition";
 import { isNonCompanyHost } from "@/server/providers/lead-source/apify-web";
 import { __setRendererForTests } from "@/server/providers/render";
 import { fetchListPage } from "@/server/web/fetch-site";
@@ -24,6 +25,16 @@ describe("yurt dışı arama sorgusu", () => {
     expect(searchLangForCountry("Türkiye")).toBe("tr");
     expect(searchLangForCountry("US")).toBe("en");
     expect(searchLangForCountry("Germany")).toBe("en");
+  });
+
+  it("yay üreticisi (rakip) adından / sektöründen tanınır; 'yay' ayrı kelime olmalı", () => {
+    expect(looksLikeSpringMaker("Yaytek Mak.Oto.Yay.Iml.Paz.San.Ve Tic.Ltd.Şti.")).toBe(true);
+    expect(looksLikeSpringMaker("Özkan Ltd.", "Yay imalatı")).toBe(true);
+    expect(looksLikeSpringMaker("Baumann Springs GmbH")).toBe(true);
+    expect(looksLikeSpringMaker("ZEMBEREK SANAYİ")).toBe(true);
+    expect(looksLikeSpringMaker("Yayla Gıda A.Ş.", "gıda")).toBe(false);
+    expect(looksLikeSpringMaker("Yayın Matbaacılık")).toBe(false);
+    expect(looksLikeSpringMaker("Aktif Hidrolik", null)).toBe(false);
   });
 
   it("yurt içi / yurt dışı ayrımı farklı yazımları tanır (kampanya pazarı)", () => {

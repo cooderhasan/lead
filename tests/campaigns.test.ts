@@ -493,6 +493,17 @@ describe("kampanya akışı", () => {
     expect(await leadsOf(byCity.id)).toEqual([konya]);
   });
 
+  it("rakipler (adında yay geçen üreticiler, Rakipler listesindekiler) kampanyaya alınmaz", async () => {
+    const a = await setupSeller();
+    const ok = await addLead(a.companyId, "Yayla Makina San. Ltd.", { genericEmail: "info@yaylamak.com" });
+    await addLead(a.companyId, "Yaytek Mak. Oto. Yay İml. Ltd.", { genericEmail: "info@yaytek.com.tr" });
+    await addLead(a.companyId, "Baumann Springs", { genericEmail: "info@baumann.com", country: "TR" });
+    await addLead(a.companyId, "Gizli Rakip A.Ş.", { genericEmail: "info@gizlirakip.com", website: "https://www.gizlirakip.com" });
+    await rawDb.competitor.create({ data: { companyId: a.companyId, name: "Gizli Rakip", website: "https://gizlirakip.com/" } });
+    const c = await createCampaign(a, { name: "Rakipsiz", targetDescription: "rakip olmayan hedef", productIds: [] });
+    expect((await rawDb.campaignLead.findMany({ where: { campaignId: c.id } })).map((l) => l.leadId)).toEqual([ok]);
+  });
+
   it("yeni kampanyaya açık kampanyadaki veya son 30 günde yazılan firmalar alınmaz", async () => {
     const a = await setupSeller();
     const inOpen = await addLead(a.companyId, "Açık Kampanyadaki", { genericEmail: "info@acik.com" });

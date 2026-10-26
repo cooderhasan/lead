@@ -32,6 +32,8 @@ import type { LeadEnrichment } from "./lead-intelligence";
 import { AppError } from "@/lib/errors";
 import { isDomesticCountry, TURKEY_COUNTRY_VARIANTS } from "@/lib/market";
 import { CONTACT_WINDOW_DAYS } from "@/lib/compliance";
+import { isCompetitorLead } from "@/lib/competition";
+import { extractDomain } from "@/lib/lead-normalize";
 import type { campaignCreateSchema } from "@/lib/validation";
 
 export const CAMPAIGN_STATUS_LABELS: Record<CampaignStatus, string> = {
@@ -133,6 +135,12 @@ function leadMarketWhere(language: string): Prisma.LeadWhereInput {
 
 const marketLabel = (language: string) => (language === "en" ? "yurt dışı" : "yurt içi");
 
+/** Rakipler listesindeki firmaların alan adları (kampanyaya alınmaz) */
+async function competitorDomains(db: ReturnType<typeof tenantDb>): Promise<Set<string>> {
+  const rows = await db.competitor.findMany({ select: { website: true } });
+  return new Set(rows.map((r) => extractDomain(r.website ?? "")).filter((d): d is string => Boolean(d)));
+}
+
 /**
  * Kampanya taslağı: seçilen ürünler + puan eşiğine göre lead listesi.
  * Her lead için uyum (compliance) değerlendirmesi hemen yapılır.
@@ -153,7 +161,7 @@ export async function createCampaign(ctx: TenantContext, input: z.infer<typeof c
   const list = input.listId ? await db.leadList.findUnique({ where: { id: input.listId }, select: { id: true, name: true } }) : null;
   if (input.listId && !list) throw new AppError("VALIDATION", "Seçilen liste bulunamadı.", { listId: "Geçersiz liste" });
   const city = input.city?.trim();
-  const leads = await db.lead.findMany({
+  const candidates = await db.lead.findMany({
     where: {
       fitScore: { gte: minScore },
       suppressed: false,
@@ -173,9 +181,13 @@ export async function createCampaign(ctx: TenantContext, input: z.infer<typeof c
       },
     },
     orderBy: { fitScore: "desc" },
-    take: input.maxLeads ?? DEFAULT_MAX_LEADS,
-    select: { id: true, fitScore: true },
+    select: { id: true, fitScore: true, companyName: true, industry: true, domain: true },
   });
+  // Rakipler (yay üreticileri, Rakipler listesindekiler) kampanyaya alınmaz
+  const rivals = await competitorDomains(db);
+  const nonCompetitors = candidates.filter((l) => !isCompetitorLead(l, rivals));
+  const excludedCompetitors = candidates.length - nonCompetitors.length;
+  const leads = nonCompetitors.slice(0, input.maxLeads ?? DEFAULT_MAX_LEADS);
   if (leads.length === 0) {
     throw new AppError(
       "VALIDATION",
@@ -220,7 +232,7 @@ export async function createCampaign(ctx: TenantContext, input: z.infer<typeof c
     action: "campaign.created",
     entityType: "Campaign",
     entityId: campaign.id,
-    metadata: { leads: leads.length, minScore },
+    metadata: { leads: leads.length, minScore, excludedCompetitors },
   });
   return campaign;
 }
@@ -745,12 +757,16 @@ export async function addLeadsToCampaign(ctx: TenantContext, campaignId: string,
   const already = new Set((await db.campaignLead.findMany({ where: { campaignId }, select: { leadId: true } })).map((c) => c.leadId));
   const candidates = await db.lead.findMany({
     where: { id: { in: [...new Set(leadIds)] }, suppressed: false, status: { notIn: [...EXCLUDED_LEAD_STATUSES] } },
-    select: { id: true, fitScore: true, country: true },
+    select: { id: true, fitScore: true, country: true, companyName: true, industry: true, domain: true },
   });
   // Kampanyanın pazarına uymayanlar (Türkçe kampanyaya yurt dışı firma vb.) eklenmez
   const wantDomestic = campaign.language !== "en";
-  const leads = candidates.filter((l) => isDomesticCountry(l.country) === wantDomestic);
-  const wrongMarket = candidates.filter((l) => !already.has(l.id)).length - leads.filter((l) => !already.has(l.id)).length;
+  const inMarket = candidates.filter((l) => isDomesticCountry(l.country) === wantDomestic);
+  const wrongMarket = candidates.filter((l) => !already.has(l.id)).length - inMarket.filter((l) => !already.has(l.id)).length;
+  // Rakipler (yay üreticileri, Rakipler listesindekiler) eklenmez
+  const rivals = await competitorDomains(db);
+  const leads = inMarket.filter((l) => !isCompetitorLead(l, rivals));
+  const competitors = inMarket.filter((l) => !already.has(l.id)).length - leads.filter((l) => !already.has(l.id)).length;
   // Başka bir açık kampanyada olan firmalar: ekip içi çakışma uyarısı (alıcıyı sıklık kuralları korur)
   const inOther = new Set(
     (
@@ -770,8 +786,8 @@ export async function addLeadsToCampaign(ctx: TenantContext, campaignId: string,
     await db.campaignLead.create({ data: { companyId: ctx.companyId, campaignId, leadId: l.id, score: l.fitScore, complianceStatus } });
     added++;
   }
-  const skipped = leadIds.length - added - wrongMarket;
+  const skipped = leadIds.length - added - wrongMarket - competitors;
   const alsoInOther = leads.filter((l) => inOther.has(l.id) && !already.has(l.id)).length;
-  await audit({ companyId: ctx.companyId, userId: ctx.userId, action: "campaign.leads_added", entityType: "Campaign", entityId: campaignId, metadata: { added, skipped, wrongMarket } });
-  return { added, skipped, noEmail, alsoInOther, wrongMarket, market: marketLabel(campaign.language), campaignName: campaign.name };
+  await audit({ companyId: ctx.companyId, userId: ctx.userId, action: "campaign.leads_added", entityType: "Campaign", entityId: campaignId, metadata: { added, skipped, wrongMarket, competitors } });
+  return { added, skipped, noEmail, alsoInOther, wrongMarket, competitors, market: marketLabel(campaign.language), campaignName: campaign.name };
 }
