@@ -458,7 +458,14 @@ const MAX_LIST_TEXT = 60_000;
 export async function fetchListPage(
   input: string,
   opts: FetchOptions & { render?: boolean } = {},
-): Promise<{ finalUrl: string; text: string; records: Array<Record<string, unknown>> | null; rendered: boolean }> {
+): Promise<{
+  finalUrl: string;
+  text: string;
+  records: Array<Record<string, unknown>> | null;
+  /** Her firması kendi detay sayfasına bağlanan kart listeleri (OSB rehberleri) */
+  cards: LinkCard[] | null;
+  rendered: boolean;
+}> {
   let start = normalizeUrl(input);
   let disallowed: RobotsRule[] = [];
   let reachable = false;
@@ -508,10 +515,16 @@ export async function fetchListPage(
   // istenirse sayfa gerçek tarayıcıda açtırılır. robots.txt kontrolü yukarıda zaten yapıldı.
   if (opts.render && !records) {
     const text = await getPageRenderer().render(start.toString());
-    return { finalUrl: start.toString(), text, records: null, rendered: true };
+    return { finalUrl: start.toString(), text, records: null, cards: null, rendered: true };
   }
   if (!page) throw new Error("Sayfa açılamadı.");
-  return { finalUrl: page.finalUrl.toString(), text: htmlToListText(page.body, page.finalUrl), records, rendered: false };
+  return {
+    finalUrl: page.finalUrl.toString(),
+    text: htmlToListText(page.body, page.finalUrl),
+    records,
+    cards: records ? null : extractLinkCards(page.body, page.finalUrl),
+    rendered: false,
+  };
 }
 
 /** Sayfadaki DataTables "ajax" veri kaynağı (aynı site ise). Saf fonksiyon. */
@@ -542,6 +555,55 @@ export function parseDataTableJson(body: string): Array<Record<string, unknown>>
   if (!rows) return null;
   const objects = rows.filter((r): r is Record<string, unknown> => Boolean(r) && typeof r === "object" && !Array.isArray(r));
   return objects.length ? objects.slice(0, 5000) : null;
+}
+
+export interface LinkCard {
+  url: string;
+  /** Kartın içindeki metin satırları (ad, telefon, e-posta…) */
+  lines: string[];
+}
+
+const CARD_MIN = 10;
+const CARD_MAX = 1000;
+
+/**
+ * Aynı sitede aynı yol altındaki (/firmalar/<ad>) bağlantılardan oluşan en büyük grubu firma kartları sayar ve
+ * her kartın metnini satır satır döner. En az 10 kart yoksa null (liste değildir). Saf fonksiyon.
+ */
+export function extractLinkCards(html: string, pageUrl: URL): LinkCard[] | null {
+  const $ = cheerio.load(html);
+  $("script, style, noscript, svg, template, head, nav, footer, header").remove();
+  $("br").replaceWith("\n");
+  $("p, div, li, span, h1, h2, h3, h4, h5, h6, dt, dd, td, small, strong").append("\n");
+  const groups = new Map<string, Map<string, Set<string>>>();
+  $("a[href]").each((_, el) => {
+    let u: URL;
+    try {
+      u = new URL(($(el).attr("href") ?? "").trim(), pageUrl);
+    } catch {
+      return;
+    }
+    if (!/^https?:$/.test(u.protocol) || registrableHost(u.hostname) !== registrableHost(pageUrl.hostname)) return;
+    const segs = u.pathname.split("/").filter(Boolean);
+    if (segs.length < 2 || u.search) return;
+    const prefix = `/${segs.slice(0, -1).join("/")}/`;
+    const lines = $(el)
+      .text()
+      .split("\n")
+      .map((l) => l.replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+    if (!lines.length) return;
+    const group = groups.get(prefix) ?? new Map<string, Set<string>>();
+    const key = `${u.origin}${u.pathname}`;
+    const set = group.get(key) ?? new Set<string>();
+    for (const l of lines) set.add(l);
+    group.set(key, set);
+    groups.set(prefix, group);
+  });
+  let best: Map<string, Set<string>> | null = null;
+  for (const g of groups.values()) if (g.size >= CARD_MIN && (!best || g.size > best.size)) best = g;
+  if (!best) return null;
+  return [...best.entries()].slice(0, CARD_MAX).map(([url, lines]) => ({ url, lines: [...lines] }));
 }
 
 /** HTML → satır korumalı metin. Saf fonksiyon (testlerde doğrudan kullanılır). */

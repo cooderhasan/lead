@@ -68,7 +68,17 @@ const GENERIC_MAILBOXES = new Set([
 /** Satış teması için tercih sırası (satın alma en iyisi); İK / muhasebe kutuları hiç seçilmez. */
 const EMAIL_PREFERENCE = ["satinalma", "purchasing", "info", "bilgi", "iletisim", "contact", "satis", "sales", "siparis", "teklif", "genel", "kurumsal", "ihracat", "export", "office", "ofis"];
 const NEVER_PICK = new Set(["ik", "hr", "muhasebe", "finans", "finance", "accounting", "fatura", "insankaynaklari", "admin", "destek", "support"]);
-const FREE_MAIL = /^(gmail|googlemail|hotmail|outlook|live|yahoo|yandex|icloud|mail)\.(com|com\.tr|net)$/;
+const FREE_MAIL = /^(gmail|googlemail|hotmail|outlook|live|windowslive|msn|yahoo|yandex|icloud|me|mail|mynet|proton|protonmail)\.(com|com\.tr|net|me)$/;
+
+/**
+ * Kurumsal e-postanın alan adı firmanın web sitesidir (info@firma.com.tr → firma.com.tr).
+ * Ücretsiz posta servislerinde (gmail…) null. Uydurma değil: adres kaynakta yazıyor. Saf fonksiyon.
+ */
+export function websiteFromEmail(email: string | null | undefined): string | null {
+  const domain = normalizeEmail(email)?.split("@")[1];
+  if (!domain || FREE_MAIL.test(domain) || isGenericHost(domain)) return null;
+  return extractDomain(domain);
+}
 
 /**
  * Web sitesinde BULUNAN adresler arasından firmanın kurumsal genel e-postasını seçer (AI'sız, uydurma yok).

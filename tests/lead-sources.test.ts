@@ -5,8 +5,9 @@ import { __setLeadSourceProviderForTests } from "@/server/providers/lead-source"
 import { ApifyWebSearchProvider, companyNameFromTitle } from "@/server/providers/lead-source/apify-web";
 import type { LeadSearchQuery, LeadSourceProvider, RawLead } from "@/server/providers/lead-source/types";
 import { drainInlineJobs } from "@/server/jobs/queue";
-import { applyListFilter, getLastListImport, mapStructuredRecords, parseListFilter, startLeadSearch, startListImport, verifyListCompanies } from "@/server/services/lead-intelligence";
-import { findDataTableSource, htmlToListText, parseDataTableJson } from "@/server/web/fetch-site";
+import { applyListFilter, getLastListImport, mapLinkCards, mapStructuredRecords, parseListFilter, startLeadSearch, startListImport, verifyListCompanies } from "@/server/services/lead-intelligence";
+import { websiteFromEmail } from "@/lib/lead-normalize";
+import { extractLinkCards, findDataTableSource, htmlToListText, parseDataTableJson } from "@/server/web/fetch-site";
 import { MockAIProvider, createTenant, resetDb, startSite } from "./helpers";
 
 beforeEach(resetDb);
@@ -182,6 +183,72 @@ describe("liste sayfasından içe aktarma", () => {
 });
 
 // ── Yapılandırılmış liste (DataTables) ─────────────────────────────────
+
+
+// OSB rehberi gibi: her firma kendi detay sayfasına bağlanan bir kart; kartta ad, telefon, e-posta
+const card = (slug: string, name: string, phone: string, email: string) =>
+  `<a href="/firmalar/${slug}" class="card"><div class="t">${name}</div><span>${phone}</span><span>${email}</span></a>`;
+const CARD_PAGE = `<html><body><nav><a href="/kurumsal/hakkimizda">Hakkımızda</a><a href="/kurumsal/iletisim">İletişim</a></nav>
+<h1>Firmalar</h1><div class="grid">
+${card("aci-hidrolik", "AÇI HİDROLİK MAK.İML. SAN. VE TİC. LTD.ŞTİ.", "903123873312", "info@acihidrolik.com.tr")}
+${card("aci-hidrolik", "AÇI HİDROLİK MAK.İML. SAN. VE TİC. LTD.ŞTİ.", "903123873312", "info@acihidrolik.com.tr")}
+${card("acenko", "Acenko Mühendislik Ltd.Şti.", "903123545460", "ozcanacer@gmail.com")}
+${card("baris-makina", "Barış Makina San. Tic. A.Ş.", "903123851181", "mehmet.yilmaz@barismakina.com")}
+${Array.from({ length: 10 }, (_, i) => card(`firma-${i}`, `Örnek Makina ${i} Ltd.`, `90312385${String(1000 + i)}`, `info@ornek${i}.com.tr`)).join("\n")}
+</div><a href="/firmalar?page=2">Sonraki</a></body></html>`;
+
+describe("firma kartı listeleri (OSB rehberi)", () => {
+  it("aynı yol altındaki bağlantıları kart sayar; menü ve sayfalama bağlantıları alınmaz; tekrar birleşir", () => {
+    const cards = extractLinkCards(CARD_PAGE, new URL("https://www.osb.org.tr/firmalar?sectorId=9"))!;
+    expect(cards).toHaveLength(13);
+    expect(cards[0]).toEqual({ url: "https://www.osb.org.tr/firmalar/aci-hidrolik", lines: ["AÇI HİDROLİK MAK.İML. SAN. VE TİC. LTD.ŞTİ.", "903123873312", "info@acihidrolik.com.tr"] });
+    expect(extractLinkCards("<html><body><a href='/a/b'>x</a></body></html>", new URL("https://x.com/"))).toBeNull();
+  });
+
+  it("kartlar AI olmadan lead'e çevrilir: kurumsal e-postadan site çıkar, kişisel adres firma e-postası sayılmaz", () => {
+    const { leads } = mapLinkCards(extractLinkCards(CARD_PAGE, new URL("https://www.osb.org.tr/firmalar"))!)!;
+    expect(leads).toHaveLength(13);
+    expect(leads[0]).toMatchObject({ companyName: "AÇI HİDROLİK MAK.İML. SAN. VE TİC. LTD.ŞTİ.", website: "acihidrolik.com.tr", genericEmail: "info@acihidrolik.com.tr", phone: "903123873312", sourceType: "DIRECTORY", sourceUrl: "https://www.osb.org.tr/firmalar/aci-hidrolik" });
+    // gmail: site yok, firma e-postası yok
+    expect(leads[1]).toMatchObject({ companyName: "Acenko Mühendislik Ltd.Şti.", website: undefined, genericEmail: undefined });
+    // kişi adı: site var (sonra "E-posta bul" info@ arar), kişisel adres firma e-postası olarak alınmaz
+    expect(leads[2]).toMatchObject({ website: "barismakina.com", genericEmail: undefined });
+  });
+
+  it("iletişim bilgisi olmayan bağlantı listeleri (haber, blog) kart sayılmaz; AI'ya bırakılır", () => {
+    const news = `<html><body>${Array.from({ length: 12 }, (_, i) => `<a href="/haber/h${i}">Sanayide yeni dönem ${i}</a>`).join("")}</body></html>`;
+    const cards = extractLinkCards(news, new URL("https://haber.com/"))!;
+    expect(cards).toHaveLength(12);
+    expect(mapLinkCards(cards)).toBeNull();
+  });
+
+  it("kurumsal e-postanın alan adı web sitesi olur; ücretsiz servisler olmaz", () => {
+    expect(websiteFromEmail("info@312makina.com.tr")).toBe("312makina.com.tr");
+    expect(websiteFromEmail("ahmet@gmail.com")).toBeNull();
+    expect(websiteFromEmail("x@hotmail.com.tr")).toBeNull();
+    expect(websiteFromEmail("x@mynet.com")).toBeNull();
+    expect(websiteFromEmail("bozuk")).toBeNull();
+  });
+
+  it("uçtan uca: kart listesi AI kullanılmadan içe aktarılır ve kredi iade edilir", async () => {
+    const a = await createTenant("A");
+    const site = await startSite({ "/robots.txt": "User-agent: *\nAllow: /", "/firmalar": CARD_PAGE });
+    try {
+      const ai = new MockAIProvider(() => JSON.stringify({ companies: [] }));
+      __setAIProviderForTests(ai);
+      const before = await balance(a.companyId);
+      await startListImport(a, { url: `${site.url}/firmalar` });
+      await drainInlineJobs();
+      expect(await getLastListImport(a)).toMatchObject({ status: "SUCCEEDED", structured: true, extracted: 13, created: 13 });
+      expect(ai.calls).toHaveLength(0);
+      expect(await balance(a.companyId)).toBe(before);
+      const l = await rawDb.lead.findFirstOrThrow({ where: { companyId: a.companyId, genericEmail: "info@acihidrolik.com.tr" } });
+      expect(l).toMatchObject({ domain: "acihidrolik.com.tr" });
+    } finally {
+      site.server.close();
+    }
+  });
+});
 
 const DT_PAGE = `<html><body><h1>Firma Listesi</h1><table id="t"><thead><tr><th>Firma</th><th>Sektör</th></tr></thead></table>
 <script>$("#t").DataTable({ processing: true, ajax: "/data.json", columns: [{ data: "company_name" }] });</script></body></html>`;

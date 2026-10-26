@@ -32,7 +32,17 @@ import { createLeadList, ensureJobList, saveDiscoveredLeads } from "./leads";
 import { AppError } from "@/lib/errors";
 import { computeReachability, finalizeScore } from "@/lib/lead-scoring";
 import { isDomesticCountry } from "@/lib/market";
-import { extractDomain, isBackOfficeEmail, isCompanyEmail, isGenericEmail, nameSimilarity, normalizeEmail, normalizePhone, pickCompanyEmail } from "@/lib/lead-normalize";
+import {
+  extractDomain,
+  isBackOfficeEmail,
+  isCompanyEmail,
+  isGenericEmail,
+  nameSimilarity,
+  normalizeEmail,
+  normalizePhone,
+  pickCompanyEmail,
+  websiteFromEmail,
+} from "@/lib/lead-normalize";
 import { checkEmailQuality } from "@/lib/email-quality";
 import { checkMailDomain } from "@/server/providers/email/mx";
 
@@ -897,8 +907,8 @@ export async function importFromList(
     const page = await fetchListPage(payload.url, { allowPrivateHosts: allowPrivateFetch(), render: payload.render });
     text = page.text;
     sourceUrl = page.finalUrl;
-    // Yapılandırılmış veri (DataTables) varsa AI'sız, birebir eşleştirme — hızlı, ücretsiz, uydurma riski yok
-    const mapped = page.records ? mapStructuredRecords(page.records, sourceUrl) : null;
+    // Yapılandırılmış veri (DataTables) veya firma kartları varsa AI'sız, birebir eşleştirme — hızlı, ücretsiz, uydurma riski yok
+    const mapped = page.records ? mapStructuredRecords(page.records, sourceUrl) : page.cards ? mapLinkCards(page.cards) : null;
     if (mapped && mapped.leads.length > 0) {
       await progress?.(50);
       const matching = applyListFilter(mapped.leads, filter);
@@ -909,7 +919,7 @@ export async function importFromList(
         sourceUrl,
         structured: true,
         truncated: matching.length > STRUCTURED_MAX,
-        extracted: page.records!.length,
+        extracted: page.records?.length ?? page.cards?.length ?? 0,
         dropped: mapped.dropped,
         filteredOut: mapped.leads.length - matching.length,
         created: saved.created,
@@ -1035,8 +1045,9 @@ export function mapStructuredRecords(records: Array<Record<string, unknown>>, so
       continue;
     }
     seen.add(key);
-    const website = k.website ? extractDomain(stripTags(r[k.website]) ?? "") : null;
     const email = k.email ? normalizeEmail(stripTags(r[k.email])) : null;
+    // Site yazmıyorsa kurumsal e-postanın alan adı kullanılır (info@firma.com.tr → firma.com.tr)
+    const website = (k.website ? extractDomain(stripTags(r[k.website]) ?? "") : null) ?? websiteFromEmail(email);
     const phone = k.phone ? stripTags(r[k.phone]) : null;
     leads.push({
       companyName: name.slice(0, 300),
@@ -1053,6 +1064,45 @@ export function mapStructuredRecords(records: Array<Record<string, unknown>>, so
     });
   }
   return { leads, dropped };
+}
+
+const CARD_EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+// En uzun rakam dizisi alınır; geçerliliği normalizePhone denetler
+const CARD_PHONE = /\+?\d[\d\s().-]{8,16}\d/;
+
+/**
+ * Firma kartlarını (bağlantı + iç metin: ad, telefon, e-posta) AI olmadan lead'e çevirir. Saf fonksiyon.
+ * Ad: e-posta / telefon / adres içermeyen ilk satır. Kişisel adres (ahmet@…, gmail) firma e-postası olarak alınmaz.
+ */
+export function mapLinkCards(cards: Array<{ url: string; lines: string[] }>) {
+  // Haber / blog listesi gibi firma rehberi olmayan sayfalar: kartların çoğunda iletişim bilgisi yoksa AI'ya bırakılır
+  const withContact = cards.filter((c) => CARD_EMAIL.test(c.lines.join(" ")) || CARD_PHONE.test(c.lines.join(" "))).length;
+  if (cards.length === 0 || withContact / cards.length < 0.3) return null;
+  const seen = new Set<string>();
+  const leads: RawLead[] = [];
+  let dropped = 0;
+  for (const c of cards) {
+    const name = c.lines.find((l) => l.length >= 3 && l.length <= 200 && !CARD_EMAIL.test(l) && !/^[\d\s()+.-]+$/.test(l) && !/^https?:|^www\./i.test(l));
+    const key = name ? normalizeForMatch(name) : "";
+    if (!name || key.length < 2 || seen.has(key)) {
+      dropped++;
+      continue;
+    }
+    seen.add(key);
+    const all = c.lines.join(" ");
+    const email = normalizeEmail(all.match(CARD_EMAIL)?.[0]);
+    const website = websiteFromEmail(email);
+    const phone = all.match(CARD_PHONE)?.[0]?.trim();
+    leads.push({
+      companyName: name.slice(0, 300),
+      website: website ?? undefined,
+      genericEmail: email && isCompanyEmail(email, website) ? email : undefined,
+      phone: phone && normalizePhone(phone) ? phone : undefined,
+      sourceType: "DIRECTORY",
+      sourceUrl: c.url,
+    });
+  }
+  return leads.length ? { leads, dropped } : null;
 }
 
 // ── 7) "Hazırla": e-posta bul → araştır → puanla (tek zincir) ──────────
