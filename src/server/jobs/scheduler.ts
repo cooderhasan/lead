@@ -2,6 +2,7 @@ import "server-only";
 import { rawDb } from "@/server/db";
 import { enqueue } from "./queue";
 import { pollMailbox } from "./imap-poll";
+import { recoverOrphanedJobs } from "./recovery";
 
 /** Aynı şirket için hatırlatma işi en fazla bu sıklıkta kuyruğa girer (kredi / AI yoksa boşa dönmesin). */
 const MIN_INTERVAL_MS = 30 * 60_000;
@@ -11,6 +12,8 @@ const MIN_INTERVAL_MS = 30 * 60_000;
  * Şirketler arası tek sorgu (yalnızca companyId okunur); işlemin kendisi tenantDb ile şirket içinde yapılır.
  */
 export async function runSchedulerTick(now = new Date()) {
+  // Deploy / yeniden başlatmada yarım kalan işler takılı kalmasın (ilk tur açılıştan ~1 dk sonra)
+  const orphanedJobs = await recoverOrphanedJobs().catch((err: Error) => (console.error("[job] kurtarma hatası", err.message), 0));
   const due = await rawDb.followUp.findMany({
     where: { status: "SCHEDULED", scheduledAt: { lte: now }, campaign: { status: { notIn: ["PAUSED", "ARCHIVED"] } } },
     distinct: ["companyId"],
@@ -33,7 +36,7 @@ export async function runSchedulerTick(now = new Date()) {
   }
   const competitorScans = await scheduleCompetitorScans();
   const mailbox = await pollMailbox().catch((err: Error) => ({ skipped: true as const, reason: err.message.slice(0, 200) }));
-  return { companies: due.length, enqueued, competitorScans, mailbox };
+  return { companies: due.length, enqueued, competitorScans, mailbox, orphanedJobs };
 }
 
 const WEEK_MS = 7 * 86_400_000;
