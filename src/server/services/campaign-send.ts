@@ -11,6 +11,7 @@ import { audit } from "@/server/audit/audit";
 import { AppError } from "@/lib/errors";
 import { normalizeEmail } from "@/lib/lead-normalize";
 import { isMonthlyCapReason } from "@/lib/compliance";
+import { BOUNCE_WINDOW_DAYS, recentBounces } from "./email-events";
 import { findSuppression, refreshLeadCompliance } from "./compliance";
 import { getSenderSettings, type SenderSettings } from "./email-settings";
 import { oneClickUnsubscribeUrl, unsubscribeUrl } from "./unsubscribe";
@@ -102,6 +103,15 @@ export async function deliverMessage(
   const suppression = await findSuppression(companyId, { email: msg.toAddress, leadId: msg.leadId });
   if (suppression) {
     await db.message.update({ where: { id: msg.id }, data: { status: "CANCELLED", error: "Alıcı ret/engel listesinde." } });
+    return "cancelled";
+  }
+
+  // 1b) Bu adrese son 30 günde gönderilen ileti geri döndüyse (kutu dolu, sunucu reddetti) tekrar denenmez
+  if (await recentBounces(companyId, msg.toAddress)) {
+    await db.message.update({
+      where: { id: msg.id },
+      data: { status: "CANCELLED", error: `Bu adrese son ${BOUNCE_WINDOW_DAYS} günde gönderilen ileti geri döndü; tekrar gönderilmez.` },
+    });
     return "cancelled";
   }
 

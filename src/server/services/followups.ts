@@ -133,6 +133,10 @@ export async function processDueFollowUps(companyId: string, now = new Date()): 
       await skip("Alıcı ret/engel listesinde.", "CANCELLED");
       continue;
     }
+    if (f.message.status === "BOUNCED") {
+      await skip("İlk ileti geri döndü (adres yok, kutu dolu veya sunucu reddetti); hatırlatma gönderilmez.", "CANCELLED");
+      continue;
+    }
     // Aylık ileti sınırına ulaşan firmaya hatırlatma gönderilemez → taslak yazılmaz, kredi harcanmaz
     const contacts = await commercialContactsInWindow(companyId, f.leadId);
     if (contacts >= MAX_CONTACTS_PER_MONTH) {

@@ -57,6 +57,16 @@ export function parseBrevoEvents(body: unknown): EmailEvent[] {
  * Olayı uygular. Kalıcı geri dönme ve şikâyet adresi engel listesine ekler
  * (alan adı itibarını korumak için bu adrese bir daha gönderilmez).
  */
+export const BOUNCE_WINDOW_DAYS = 30;
+const TRANSIENT_BOUNCE_LIMIT = 2;
+
+/** Bu adrese son 30 günde gönderilip geri dönen ileti sayısı (geçici + kalıcı) */
+export async function recentBounces(companyId: string, address: string): Promise<number> {
+  return tenantDb({ companyId }).message.count({
+    where: { toAddress: address, direction: "OUTBOUND", status: "BOUNCED", bouncedAt: { gte: new Date(Date.now() - BOUNCE_WINDOW_DAYS * 86_400_000) } },
+  });
+}
+
 export async function applyEmailEvent(event: EmailEvent): Promise<boolean> {
   if (event.type === "ignored") return false;
   const owner = await findMessageOwner(event.providerMessageId);
@@ -84,6 +94,18 @@ async function applyEventToMessage(owner: { id: string; companyId: string }, eve
     await db.message.update({ where: { id: msg.id }, data: { status: "BOUNCED", bouncedAt: new Date(), error: event.permanent ? "Kalıcı geri dönme" : "Geçici geri dönme" } });
     if (event.permanent && msg.toAddress) {
       await addSuppression(owner.companyId, { type: "EMAIL", value: msg.toAddress, source: "BOUNCE", reason: "Adres geçersiz / kalıcı geri döndü.", leadId: msg.leadId });
+    } else if (msg.toAddress) {
+      // Geçici geri dönme (kutu dolu, sunucu meşgul) tekrarlıyorsa adres kalıcı gibi engellenir: bounce oranı itibarı bozar
+      const recent = await recentBounces(owner.companyId, msg.toAddress);
+      if (recent >= TRANSIENT_BOUNCE_LIMIT) {
+        await addSuppression(owner.companyId, {
+          type: "EMAIL",
+          value: msg.toAddress,
+          source: "BOUNCE",
+          reason: `Son ${BOUNCE_WINDOW_DAYS} günde ${recent} kez geçici geri döndü (kutu dolu / sunucu reddetti).`,
+          leadId: msg.leadId,
+        });
+      }
     }
   } else if (msg.toAddress) {
     await addSuppression(owner.companyId, {

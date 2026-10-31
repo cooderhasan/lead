@@ -595,4 +595,49 @@ describe("ret ve sağlayıcı olayları", () => {
 
     expect(await applyEmailEvent({ type: "delivered", providerMessageId: "bilinmeyen" })).toBe(false);
   });
+
+  it("geçici geri dönme: ilk seferde engellenmez, 30 günde ikinci kez olursa engellenir", async () => {
+    const a = await setupSeller();
+    const leadId = await addLead(a.companyId, "Dolu Kutu", { genericEmail: "info@dolukutu.com" });
+    const mk = (p: string) => rawDb.message.create({ data: { companyId: a.companyId, leadId, channel: "EMAIL", toAddress: "info@dolukutu.com", body: "x", status: "SENT", providerMessageId: p } });
+    await mk("t-1");
+    await mk("t-2");
+    await applyEmailEvent({ type: "bounced", providerMessageId: "t-1", permanent: false });
+    expect(await rawDb.suppressionRecord.count({ where: { companyId: a.companyId } })).toBe(0);
+    await applyEmailEvent({ type: "bounced", providerMessageId: "t-2", permanent: false });
+    const rec = await rawDb.suppressionRecord.findFirstOrThrow({ where: { companyId: a.companyId } });
+    expect(rec).toMatchObject({ value: "info@dolukutu.com", source: "BOUNCE", reason: expect.stringMatching(/2 kez geçici/) });
+  });
+
+  it("yakın zamanda geri dönen adrese onaylı ileti gönderilmez; ilk iletisi geri dönen firmaya hatırlatma taslağı yazılmaz", async () => {
+    const a = await setupSeller();
+    const bounced = await addLead(a.companyId, "Dönen Firma", { genericEmail: "info@donen.com" });
+    await addLead(a.companyId, "Sağlam Firma", { genericEmail: "info@saglam.com" });
+    const campaign = await readyCampaign(a);
+    const steps = await rawDb.campaignStep.findMany({ where: { campaignId: campaign.id }, orderBy: { order: "asc" } });
+    // Dönen firmaya daha önce gönderilen ileti geçici geri dönmüş
+    const first = await rawDb.message.create({
+      data: { companyId: a.companyId, leadId: bounced, campaignId: campaign.id, campaignStepId: steps[0]!.id, channel: "EMAIL", direction: "OUTBOUND", toAddress: "info@donen.com", subject: "s", body: "b", status: "BOUNCED", sentAt: new Date(Date.now() - 6 * 86_400_000), bouncedAt: new Date(Date.now() - 6 * 86_400_000), error: "Geçici geri dönme" },
+    });
+    const msgs = await rawDb.message.findMany({ where: { campaignId: campaign.id, status: "PENDING_APPROVAL" } });
+    await approveMessages(a, msgs.map((m) => m.id));
+    await approveCampaign(a, campaign.id);
+    await saveSenderSettings(a, SENDER);
+    const email = new FakeEmail();
+    __setEmailProviderForTests(email);
+    await startSending(a, campaign.id);
+    await drainInlineJobs();
+    expect(email.sent.map((e) => e.to)).toEqual(["info@saglam.com"]);
+    const blocked = msgs.find((m) => m.leadId === bounced)!;
+    expect(await rawDb.message.findUniqueOrThrow({ where: { id: blocked.id } })).toMatchObject({ status: "CANCELLED", error: expect.stringMatching(/geri döndü/) });
+
+    const ai = new MockAIProvider(() => goodMessage);
+    __setAIProviderForTests(ai);
+    const f = await rawDb.followUp.create({
+      data: { companyId: a.companyId, leadId: bounced, campaignId: campaign.id, campaignStepId: steps[1]!.id, messageId: first.id, scheduledAt: new Date(Date.now() - 60_000) },
+    });
+    await processDueFollowUps(a.companyId);
+    expect(ai.calls).toHaveLength(0);
+    expect(await rawDb.followUp.findUniqueOrThrow({ where: { id: f.id } })).toMatchObject({ status: "CANCELLED", skipReason: expect.stringMatching(/geri döndü/) });
+  });
 });
