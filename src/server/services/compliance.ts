@@ -164,6 +164,14 @@ const STATUS_RANK: Record<ComplianceStatus, number> = { SENDABLE: 2, REVIEW_REQU
  * Lead'in tüm e-posta adreslerini (kurumsal + kişiler) değerlendirir ve ComplianceRecord'ları günceller.
  * İnsan incelemesi (basis + reviewedAt) korunur. En uygun adresi döner (kurumsal SENDABLE öncelikli).
  */
+/** Firmaya son 30 günde gönderilen ticari ileti sayısı (yanıtlar hariç) — aylık sınır için */
+export async function commercialContactsInWindow(companyId: string, leadId: string): Promise<number> {
+  const windowStart = new Date(Date.now() - CONTACT_WINDOW_DAYS * 86_400_000);
+  return tenantDb({ companyId }).message.count({
+    where: { leadId, channel: "EMAIL", direction: "OUTBOUND", status: { in: ["SENT", "DELIVERED"] }, conversationId: null, sentAt: { gte: windowStart } },
+  });
+}
+
 export async function refreshLeadCompliance(companyId: string, leadId: string) {
   const db = tenantDb({ companyId });
   const lead = await db.lead.findUnique({
@@ -212,10 +220,7 @@ export async function refreshLeadCompliance(companyId: string, leadId: string) {
   }
 
   // Firma bazlı sıklık: aynı alan adına son ileti + son 30 gündeki ticari ileti sayısı (yanıtlar hariç)
-  const windowStart = new Date(Date.now() - CONTACT_WINDOW_DAYS * 86_400_000);
-  const contactsInWindow = await db.message.count({
-    where: { leadId, channel: "EMAIL", direction: "OUTBOUND", status: { in: ["SENT", "DELIVERED"] }, conversationId: null, sentAt: { gte: windowStart } },
-  });
+  const contactsInWindow = await commercialContactsInWindow(companyId, leadId);
 
   const results = [];
   for (const cand of candidates) {

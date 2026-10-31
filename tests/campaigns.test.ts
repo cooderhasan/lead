@@ -28,6 +28,7 @@ import {
 } from "@/server/services/campaigns";
 import { buildEmailContent } from "@/server/services/campaign-send";
 import { checkMessageQuality } from "@/server/services/message-quality";
+import { processDueFollowUps } from "@/server/services/followups";
 import { processUnsubscribe, unsubscribeToken, verifyUnsubscribeToken } from "@/server/services/unsubscribe";
 import { applyEmailEvent, parseBrevoEvents, parseResendEvents } from "@/server/services/email-events";
 import { evaluateEmailCompliance } from "@/lib/compliance";
@@ -427,6 +428,61 @@ describe("kampanya akışı", () => {
       expect(await rawDb.message.count({ where: { campaignId: campaign.id, status: "APPROVED" } })).toBe(1);
       const job = await rawDb.job.findFirstOrThrow({ where: { type: "campaign.send" } });
       expect(job.result).toMatchObject({ sent: 1, quotaReached: true, remainingApproved: 1 });
+    } finally {
+      delete process.env.EMAIL_DAILY_LIMIT;
+      (await import("@/server/env")).resetEnvCache();
+    }
+  });
+
+  it("aylık sınırdaki hatırlatma sırayı tıkamaz: iptal edilir, sınır yalnızca gönderilenleri sayar; o firmaya yeni hatırlatma taslağı yazılmaz", async () => {
+    process.env.EMAIL_DAILY_LIMIT = "1";
+    const { resetEnvCache } = await import("@/server/env");
+    resetEnvCache();
+    try {
+      const a = await setupSeller();
+      const dolu = await addLead(a.companyId, "Dolu Makina", { genericEmail: "info@dolu.com" });
+      await addLead(a.companyId, "Yeni Makina", { genericEmail: "info@yeni.com" });
+      const campaign = await readyCampaign(a);
+      const steps = await rawDb.campaignStep.findMany({ where: { campaignId: campaign.id }, orderBy: { order: "asc" } });
+      // Dolu firmasına son 30 günde 2 ticari ileti gitmiş (5 gün önce) → üçüncüsü aylık sınıra takılır
+      const fiveDaysAgo = new Date(Date.now() - 5 * 86_400_000);
+      const prior = await Promise.all(
+        [1, 2].map(() =>
+          rawDb.message.create({
+            data: { companyId: a.companyId, leadId: dolu, campaignId: campaign.id, campaignStepId: steps[0]!.id, channel: "EMAIL", direction: "OUTBOUND", toAddress: "info@dolu.com", subject: "s", body: "b", status: "DELIVERED", sentAt: fiveDaysAgo },
+          }),
+        ),
+      );
+      const msgs = await rawDb.message.findMany({ where: { campaignId: campaign.id, status: "PENDING_APPROVAL" } });
+      await approveMessages(a, msgs.map((m) => m.id));
+      // Dolu'nun iletisi bir hatırlatma (2. adım) ve en eski onaylı ileti
+      const doluMsg = msgs.find((m) => m.leadId === dolu)!;
+      await rawDb.message.update({ where: { id: doluMsg.id }, data: { campaignStepId: steps[1]!.id, approvedAt: new Date(Date.now() - 3_600_000) } });
+      await approveCampaign(a, campaign.id);
+      await saveSenderSettings(a, SENDER);
+      const email = new FakeEmail();
+      __setEmailProviderForTests(email);
+
+      await startSending(a, campaign.id);
+      await drainInlineJobs();
+      // Sınır 1: engellenen hatırlatma atlanıp gönderilebilir ileti gönderildi
+      expect(email.sent.map((e) => e.to)).toEqual(["info@yeni.com"]);
+      expect(await rawDb.message.findUniqueOrThrow({ where: { id: doluMsg.id } })).toMatchObject({ status: "CANCELLED", error: expect.stringMatching(/Hatırlatma iptal/) });
+      const job = await rawDb.job.findFirstOrThrow({ where: { type: "campaign.send" } });
+      expect(job.result).toMatchObject({ sent: 1, remainingApproved: 0, quotaReached: false });
+
+      // Vakti gelmiş hatırlatma: aylık sınırdaki firmaya AI taslağı yazılmaz, kredi harcanmaz
+      const ai = new MockAIProvider(() => goodMessage);
+      __setAIProviderForTests(ai);
+      const f = await rawDb.followUp.create({
+        data: { companyId: a.companyId, leadId: dolu, campaignId: campaign.id, campaignStepId: steps[1]!.id, messageId: prior[0]!.id, scheduledAt: new Date(Date.now() - 60_000) },
+      });
+      const before = await balance(a.companyId);
+      const res = await processDueFollowUps(a.companyId);
+      expect(res).toMatchObject({ drafted: 0, skipped: 1 });
+      expect(ai.calls).toHaveLength(0);
+      expect(await balance(a.companyId)).toBe(before);
+      expect(await rawDb.followUp.findUniqueOrThrow({ where: { id: f.id } })).toMatchObject({ status: "CANCELLED", skipReason: expect.stringMatching(/üst sınır 2/) });
     } finally {
       delete process.env.EMAIL_DAILY_LIMIT;
       (await import("@/server/env")).resetEnvCache();

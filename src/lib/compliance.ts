@@ -48,6 +48,11 @@ export interface ComplianceResult {
   reasons: string[];
 }
 
+/** Aylık ileti sınırı gerekçesi mi ("Bu firmaya son 30 günde 2 ticari ileti gönderildi…")? */
+export function isMonthlyCapReason(reason: string | null | undefined): boolean {
+  return Boolean(reason && reason.startsWith(`Bu firmaya son ${CONTACT_WINDOW_DAYS} günde`));
+}
+
 export function evaluateEmailCompliance(i: ComplianceInput): ComplianceResult {
   const address = normalizeEmail(i.address);
   if (!address) return { status: "DO_NOT_SEND", reasons: ["Geçersiz e-posta adresi."] };

@@ -12,7 +12,8 @@ import { AppError, isAppError } from "@/lib/errors";
 import { buildVerifiedCompanyContext } from "./facts";
 import { getSenderSettings } from "./email-settings";
 import { checkMessageQuality } from "./message-quality";
-import { findSuppression } from "./compliance";
+import { commercialContactsInWindow, findSuppression } from "./compliance";
+import { CONTACT_WINDOW_DAYS, MAX_CONTACTS_PER_MONTH } from "@/lib/compliance";
 
 const DAY = 86_400_000;
 /** Bu durumlardaki lead'e hatırlatma yazılmaz */
@@ -130,6 +131,12 @@ export async function processDueFollowUps(companyId: string, now = new Date()): 
     }
     if (await findSuppression(companyId, { email: f.message.toAddress, leadId: f.leadId })) {
       await skip("Alıcı ret/engel listesinde.", "CANCELLED");
+      continue;
+    }
+    // Aylık ileti sınırına ulaşan firmaya hatırlatma gönderilemez → taslak yazılmaz, kredi harcanmaz
+    const contacts = await commercialContactsInWindow(companyId, f.leadId);
+    if (contacts >= MAX_CONTACTS_PER_MONTH) {
+      await skip(`Bu firmaya son ${CONTACT_WINDOW_DAYS} günde ${contacts} ticari ileti gönderildi (üst sınır ${MAX_CONTACTS_PER_MONTH}).`, "CANCELLED");
       continue;
     }
     if (!isAIConfigured()) {

@@ -10,6 +10,7 @@ import type { OutgoingEmail } from "@/server/providers/email/types";
 import { audit } from "@/server/audit/audit";
 import { AppError } from "@/lib/errors";
 import { normalizeEmail } from "@/lib/lead-normalize";
+import { isMonthlyCapReason } from "@/lib/compliance";
 import { findSuppression, refreshLeadCompliance } from "./compliance";
 import { getSenderSettings, type SenderSettings } from "./email-settings";
 import { oneClickUnsubscribeUrl, unsubscribeUrl } from "./unsubscribe";
@@ -124,6 +125,15 @@ export async function deliverMessage(
       return "cancelled";
     }
     if (rec.status !== "SENDABLE") {
+      // Aylık sınırı aşacak hatırlatma beklemede kalmaz (bir ay sonra "son hatırlatma" anlamsız): iptal edilir
+      const step = msg.campaignStepId ? await db.campaignStep.findUnique({ where: { id: msg.campaignStepId }, select: { order: true } }) : null;
+      if (step && step.order > 1 && isMonthlyCapReason(rec.reasons[0])) {
+        await db.message.update({
+          where: { id: msg.id },
+          data: { status: "CANCELLED", complianceStatus: rec.status, error: `Hatırlatma iptal: ${rec.reasons[0]}` },
+        });
+        return "cancelled";
+      }
       await db.message.update({ where: { id: msg.id }, data: { complianceStatus: rec.status, error: rec.reasons[0] ?? "İnceleme gerekli." } });
       return "skipped";
     }
@@ -194,6 +204,9 @@ async function deliveryContext(companyId: string): Promise<DeliveryContext> {
   return { settings, provider };
 }
 
+/** Bir gönderim turunda taranan en fazla onaylı ileti */
+const SEND_SCAN_MAX = 500;
+
 async function remainingQuota(companyId: string) {
   const sentToday = await tenantDb({ companyId }).message.count({ where: { direction: "OUTBOUND", channel: "EMAIL", sentAt: { gte: startOfToday() } } });
   return Math.max(0, env().EMAIL_DAILY_LIMIT - sentToday);
@@ -211,14 +224,15 @@ export async function sendApprovedMessages(
   const db = tenantDb({ companyId });
   const dctx = await deliveryContext(companyId);
   const quota = await remainingQuota(companyId);
-  const batch = await db.message.findMany({
-    where: { campaignId, status: "APPROVED" },
-    orderBy: { approvedAt: "asc" },
-    take: quota,
-  });
+  // Sınır yalnızca GÖNDERİLEN iletileri sayar: atlanan (inceleme gerekli) iletiler sırayı tıkamasın diye
+  // onaylıların tamamı taranır, kota dolunca durulur
+  const batch = quota > 0
+    ? await db.message.findMany({ where: { campaignId, status: "APPROVED" }, orderBy: { approvedAt: "asc" }, take: SEND_SCAN_MAX })
+    : [];
 
   const result: SendRunResult = { sent: 0, failed: 0, skipped: 0, remainingApproved: 0, quotaReached: false, paused: false };
   for (let i = 0; i < batch.length; i++) {
+    if (result.sent >= quota) break;
     const campaign = await db.campaign.findUnique({ where: { id: campaignId }, select: { status: true } });
     if (campaign?.status !== "RUNNING") {
       result.paused = true;
@@ -233,7 +247,7 @@ export async function sendApprovedMessages(
   }
 
   result.remainingApproved = await db.message.count({ where: { campaignId, status: "APPROVED" } });
-  result.quotaReached = result.remainingApproved > 0 && !result.paused && batch.length >= quota;
+  result.quotaReached = result.remainingApproved > 0 && !result.paused && result.sent >= quota;
 
   // Açık mesaj ve planlı hatırlatma kalmadıysa kampanya tamamlanır
   const open = await db.message.count({ where: { campaignId, status: { in: ["DRAFT", "PENDING_APPROVAL", "APPROVED", "SCHEDULED"] } } });
