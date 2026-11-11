@@ -7,6 +7,7 @@ import { getPlatformOverview } from "@/server/admin/stats";
 import { logoutAction } from "@/app/actions/auth";
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, PageHeader, Stat } from "@/components/ui";
 import { formatDate, formatDateTime, formatNumber } from "@/lib/cn";
+import { CreditGrantForm } from "./credit-form";
 
 export const metadata: Metadata = { title: "Platform yönetimi" };
 
@@ -43,7 +44,7 @@ export default async function AdminPage() {
       <Card className="mb-6">
         <CardHeader title="Şirketler" />
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-sm">
+          <table className="w-full min-w-[960px] text-sm">
             <thead className="border-b border-border text-left text-xs text-text-2">
               <tr>
                 <th className="px-5 py-2.5 font-medium">Şirket</th>
@@ -51,7 +52,8 @@ export default async function AdminPage() {
                 <th className="px-3 py-2.5 text-right font-medium">Kredi</th>
                 <th className="px-3 py-2.5 text-right font-medium">Üye / Ürün / Doküman / Lead</th>
                 <th className="px-3 py-2.5 text-right font-medium">AI (30g)</th>
-                <th className="px-5 py-2.5 font-medium">Kurulum</th>
+                <th className="px-3 py-2.5 font-medium">Kurulum</th>
+                <th className="px-5 py-2.5 font-medium">Kredi yükle</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -62,7 +64,8 @@ export default async function AdminPage() {
                   <td className="px-3 py-2.5 text-right tabular-nums">{formatNumber(c.creditBalance)}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums">{c._count.members} / {c._count.products} / {c._count.documents} / {c._count.leads}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums">${c.aiCostUsd30d.toFixed(2)} <span className="text-text-3">({c.aiCalls30d})</span></td>
-                  <td className="px-5 py-2.5">{c.onboardingCompletedAt ? <Badge tone="success">Tamam</Badge> : <Badge>Devam ediyor</Badge>}</td>
+                  <td className="px-3 py-2.5">{c.onboardingCompletedAt ? <Badge tone="success">Tamam</Badge> : <Badge>Devam ediyor</Badge>}</td>
+                  <td className="px-5 py-2.5"><CreditGrantForm companyId={c.id} companyName={c.name} /></td>
                 </tr>
               ))}
             </tbody>

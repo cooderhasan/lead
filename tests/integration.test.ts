@@ -6,6 +6,7 @@ import { __setAIProviderForTests, ai } from "@/server/ai";
 import type { GenerateTextInput, GenerateTextResult } from "@/server/ai/types";
 import { drainInlineJobs } from "@/server/jobs/queue";
 import { consumeCredits, refundCredits } from "@/server/usage/credits";
+import { adminGrantCredits } from "@/server/admin/credits";
 import { authenticate, registerUser } from "@/server/auth/service";
 import { startOwnWebsiteAnalysis } from "@/server/services/website-analysis";
 import { correctFact, verifyFacts, buildVerifiedCompanyContext, reviewSummary } from "@/server/services/facts";
@@ -66,6 +67,22 @@ describe("kredi sistemi", () => {
     await refundCredits(usageId, "test");
     await refundCredits(usageId, "test");
     expect((await rawDb.company.findUniqueOrThrow({ where: { id: ctx.companyId } })).creditBalance).toBe(100);
+  });
+
+  it("platform yöneticisi kredi yükler; diğer kullanıcılar yükleyemez, geçersiz miktar reddedilir", async () => {
+    const ctx = await createTenant("Kredi C"); // 100 kredi
+    const user = { userId: ctx.userId, email: "a@b.com", name: "A", sessionId: "s", activeCompanyId: ctx.companyId };
+    await expect(adminGrantCredits({ ...user, isPlatformAdmin: false }, { companyId: ctx.companyId, credits: 500 })).rejects.toThrow(/yönetici/);
+    const admin = { ...user, isPlatformAdmin: true };
+    await expect(adminGrantCredits(admin, { companyId: ctx.companyId, credits: 0 })).rejects.toThrow(/tam sayı/);
+    await expect(adminGrantCredits(admin, { companyId: ctx.companyId, credits: 2.5 })).rejects.toThrow(/tam sayı/);
+    await expect(adminGrantCredits(admin, { companyId: "yok", credits: 10 })).rejects.toThrow(/bulunamadı/);
+
+    expect(await adminGrantCredits(admin, { companyId: ctx.companyId, credits: 500 })).toEqual({ name: "Kredi C", creditBalance: 600 });
+    // Açılış kredisi de "credit.grant"; en son kayıt yöneticinin yüklemesi
+    const grant = await rawDb.usageRecord.findFirst({ where: { companyId: ctx.companyId, operation: "credit.grant" }, orderBy: { createdAt: "desc" } });
+    expect(grant).toMatchObject({ credits: 500, userId: ctx.userId });
+    expect(await rawDb.auditLog.count({ where: { companyId: ctx.companyId, action: "credit.granted" } })).toBe(1);
   });
 });
 
