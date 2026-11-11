@@ -87,6 +87,9 @@ export function isAIConfigured(): boolean {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Yanıtın token sınırında kesildiğini bildiren durma nedenleri (OpenAI/OpenRouter, Anthropic, Gemini) */
+const TRUNCATED_STOP_REASONS = new Set(["length", "max_tokens", "MAX_TOKENS"]);
+
 /** Sağlayıcının istek sınırı (429) dolu: çağıran bir süre bekleyip aynı işi yeniden deneyebilir */
 export class AIRateLimitError extends AppError {
   constructor(message: string) {
@@ -266,13 +269,9 @@ export class AIService {
 Beklenen yapı:
 ${input.shape}`;
 
-    const first = await this.generateText({
-      system,
-      tier: input.tier,
-      maxTokens: input.maxTokens ?? 4096,
-      temperature: 0,
-      messages: [{ role: "user", content: input.input }],
-    });
+    const maxTokens = input.maxTokens ?? 4096;
+    const ask = (tokens: number) =>
+      this.generateText({ system, tier: input.tier, maxTokens: tokens, temperature: 0, messages: [{ role: "user", content: input.input }] });
 
     const tryParse = (text: string) => {
       try {
@@ -282,17 +281,23 @@ ${input.shape}`;
       }
     };
 
-    const parsed = tryParse(first.text);
+    let first = await ask(maxTokens);
+    let parsed = tryParse(first.text);
+    // Yanıt token sınırında kesildi (düşünen modeller düşünmeyi de bu sınırdan harcar): daha geniş sınırla bir kez yeniden iste
+    if (!parsed.success && TRUNCATED_STOP_REASONS.has(String(first.stopReason))) {
+      first = await ask(Math.min(maxTokens * 4, 16_000));
+      parsed = tryParse(first.text);
+    }
     if (parsed.success) return { data: parsed.data, raw: first };
 
     const repair = await this.generateText({
       system,
       tier: input.tier,
-      maxTokens: input.maxTokens ?? 4096,
+      maxTokens: Math.min(maxTokens * 4, 16_000),
       temperature: 0,
       messages: [
         { role: "user", content: input.input },
-        { role: "assistant", content: first.text },
+        { role: "assistant", content: first.text || "(boş yanıt)" },
         {
           role: "user",
           content: `Yanıtın beklenen JSON yapısına uymuyor: ${String(parsed.error?.message ?? parsed.error).slice(0, 1500)}\nYalnızca düzeltilmiş JSON'u döndür.`,
@@ -301,6 +306,8 @@ ${input.shape}`;
     });
     const second = tryParse(repair.text);
     if (second.success) return { data: second.data, raw: repair };
+    // Teşhis için: hangi model, neden durdu, ne döndürdü (Coolify → Runtime Logs)
+    console.warn("[ai] geçersiz JSON", this.ctx.operation, repair.model, repair.stopReason, JSON.stringify(repair.text.slice(0, 300)));
     throw new AppError("AI_UNAVAILABLE", "AI geçerli bir sonuç üretemedi. Lütfen tekrar deneyin.");
   }
 

@@ -113,6 +113,12 @@ describe("AI JSON ayrıştırma", () => {
     expect(parseJsonFromText("[1,2]")).toEqual([1, 2]);
     expect(() => parseJsonFromText("json yok")).toThrow();
   });
+
+  it("düşünen modellerin <think> bölümünü atlar", () => {
+    expect(parseJsonFromText('<think>Şöyle bir yapı {x} kurmalıyım…</think>\n{"a":1}')).toEqual({ a: 1 });
+    // Kapanmamış düşünme bölümü: JSON yok sayılır
+    expect(() => parseJsonFromText('<think>{"a":1} diye yazacağım ama')).toThrow();
+  });
 });
 
 describe("kanıt kontrolü", () => {

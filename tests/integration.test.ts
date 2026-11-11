@@ -1,7 +1,9 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { rm } from "node:fs/promises";
 import { rawDb } from "@/server/db";
-import { __setAIProviderForTests } from "@/server/ai";
+import { z } from "zod";
+import { __setAIProviderForTests, ai } from "@/server/ai";
+import type { GenerateTextInput, GenerateTextResult } from "@/server/ai/types";
 import { drainInlineJobs } from "@/server/jobs/queue";
 import { consumeCredits, refundCredits } from "@/server/usage/credits";
 import { authenticate, registerUser } from "@/server/auth/service";
@@ -300,5 +302,30 @@ describe("AI yapılandırılmamışken", () => {
     expect(saved.status).toBe("READY");
     expect((await searchKnowledge(ctx, "otomotiv")).length).toBe(1);
     expect((await rawDb.company.findUniqueOrThrow({ where: { id: ctx.companyId } })).creditBalance).toBe(100);
+  });
+});
+
+describe("AI yapılandırılmış çıktı", () => {
+  it("token sınırında kesilen yanıt daha geniş sınırla yeniden istenir", async () => {
+    const ctx = await createTenant("Kesik Yanıt");
+    const limits: number[] = [];
+    __setAIProviderForTests({
+      name: "openai",
+      async generateText(input: GenerateTextInput & { model: string }): Promise<GenerateTextResult> {
+        limits.push(input.maxTokens ?? 0);
+        // Düşünen model: ilk istekte düşünme sınırı tüketir, yanıt yarım kalır
+        const cut = limits.length === 1;
+        return { text: cut ? '{"label": "ev' : '{"label": "evet"}', provider: "openai", model: "m:free", inputTokens: 10, outputTokens: 10, stopReason: cut ? "length" : "stop" };
+      },
+    });
+    const { data } = await ai({ companyId: ctx.companyId, operation: "test" }).extract({
+      schema: z.object({ label: z.string() }),
+      shape: '{"label": "string"}',
+      instructions: "Etiketle.",
+      input: "metin",
+      maxTokens: 1200,
+    });
+    expect(data).toEqual({ label: "evet" });
+    expect(limits).toEqual([1200, 4800]);
   });
 });

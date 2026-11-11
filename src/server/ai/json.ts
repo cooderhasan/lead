@@ -1,9 +1,9 @@
 /**
- * Model çıktısından JSON nesnesi/dizisi çıkarır. Kod bloğu (```json) ve önündeki/arkasındaki
- * açıklama metnini tolere eder.
+ * Model çıktısından JSON nesnesi/dizisi çıkarır. Kod bloğu (```json), önündeki/arkasındaki
+ * açıklama metnini ve düşünen modellerin <think>…</think> bölümünü tolere eder.
  */
 export function parseJsonFromText(text: string): unknown {
-  const trimmed = text.trim();
+  const trimmed = text.replace(/<think>[\s\S]*?(<\/think>|$)/gi, "").trim();
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
   const candidate = fenced?.[1]?.trim() ?? trimmed;
 
