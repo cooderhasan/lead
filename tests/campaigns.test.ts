@@ -2,6 +2,8 @@ import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { rawDb } from "@/server/db";
 import { __setAIProviderForTests, __setRateLimitWaitsForTests } from "@/server/ai";
 import { AIProviderError } from "@/server/ai/types";
+import { onCampaignMessagesFailure } from "@/server/jobs/handlers/campaign";
+import { consumeCredits } from "@/server/usage/credits";
 import { __setEmailProviderForTests, checkSenderDomain } from "@/server/providers/email";
 import type { EmailProvider, OutgoingEmail } from "@/server/providers/email/types";
 import { drainInlineJobs } from "@/server/jobs/queue";
@@ -417,6 +419,29 @@ describe("kampanya akışı", () => {
     } finally {
       __setRateLimitWaitsForTests(null);
     }
+  });
+
+  it("yarıda kesilen mesaj üretiminde yazılan mesajlar kalır, yalnızca yazılamayanların kredisi iade edilir", async () => {
+    const a = await setupSeller();
+    const leadIds = await Promise.all(["bir", "iki", "uc"].map((n) => addLead(a.companyId, `Firma ${n}`, { genericEmail: `info@firma${n}.com` })));
+    __setAIProviderForTests(new MockAIProvider(() => strategyJson));
+    const campaign = await createCampaign(a, { name: "Kesik", targetDescription: "Otomotiv yan sanayi firmalarına basma yay", productIds: [], minScore: 45 });
+    await startStrategyGeneration(a, campaign.id);
+    await drainInlineJobs();
+    await approveStrategy(a, campaign.id);
+    const step = await rawDb.campaignStep.findFirstOrThrow({ where: { campaignId: campaign.id }, orderBy: { order: "asc" } });
+
+    // 3 lead için kredi ayrıldı; iş 1 mesaj yazdıktan sonra kesildi (ör. deploy)
+    const before = await balance(a.companyId);
+    const { usageId } = await consumeCredits({ companyId: a.companyId, operation: "ai.message", quantity: 3 });
+    await rawDb.message.create({
+      data: { companyId: a.companyId, leadId: leadIds[0]!, campaignId: campaign.id, campaignStepId: step.id, channel: "EMAIL", toAddress: "info@firmabir.com", body: "b", status: "PENDING_APPROVAL" },
+    });
+    await onCampaignMessagesFailure({ campaignId: campaign.id, leadIds, usageId });
+    expect(await balance(a.companyId)).toBe(before - 1);
+    // İade bir kez yapılır
+    await onCampaignMessagesFailure({ campaignId: campaign.id, leadIds, usageId });
+    expect(await balance(a.companyId)).toBe(before - 1);
   });
 
   it("onaydan sonra ret gelen adrese gönderilmez; duraklatılan kampanya gönderimi durdurur", async () => {

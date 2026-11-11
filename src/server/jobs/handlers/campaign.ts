@@ -1,4 +1,5 @@
 import "server-only";
+import { rawDb } from "@/server/db";
 import { generateCampaignMessages, generateStrategy } from "@/server/services/campaigns";
 import { pauseAfterSendFailure, sendApprovedMessages } from "@/server/services/campaign-send";
 import { refundCredits, CREDIT_COSTS } from "@/server/usage/credits";
@@ -27,8 +28,20 @@ export const campaignMessagesJob: JobHandler<"campaign.generate_messages"> = asy
   return res;
 };
 
+/**
+ * İş yarıda kesildiyse (hata, deploy) yazılmış mesajlar kalır: yalnızca yazılamayan lead'lerin kredisi iade edilir.
+ * İş yalnızca ilk adım mesajı olmayan lead'lerle başlar; bu lead'lerin iptal edilmemiş ilk adım mesajları bu işin yazdıklarıdır.
+ */
 export async function onCampaignMessagesFailure(payload: JobPayloads["campaign.generate_messages"]) {
-  if (payload.usageId) await refundCredits(payload.usageId, "campaign.messages.failed");
+  if (!payload.usageId) return;
+  const step = await rawDb.campaignStep.findFirst({ where: { campaignId: payload.campaignId }, orderBy: { order: "asc" }, select: { id: true } });
+  const written = step
+    ? await rawDb.message.count({
+        where: { campaignId: payload.campaignId, campaignStepId: step.id, leadId: { in: payload.leadIds }, status: { not: "CANCELLED" } },
+      })
+    : 0;
+  const unused = (payload.leadIds.length - written) * CREDIT_COSTS["ai.message"];
+  if (unused > 0) await refundCredits(payload.usageId, "campaign.messages.failed", unused);
 }
 
 export const campaignSendJob: JobHandler<"campaign.send"> = async ({ campaignId }, h) => {

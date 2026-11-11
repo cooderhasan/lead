@@ -151,7 +151,12 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
         </div>
       )}
       {!activeJob && lastJob?.status === "FAILED" && (
-        <Alert tone="warning" className="mb-6">Son işlem tamamlanamadı: {lastJob.error} {lastJob.type !== "campaign.send" && "Kredi iade edildi."}</Alert>
+        <Alert tone="warning" className="mb-6">
+          Son işlem tamamlanamadı: {lastJob.error}{" "}
+          {lastJob.type === "campaign.generate_messages"
+            ? "Yazılan mesajlar duruyor; yazılamayanların kredisi iade edildi. Kalanlar için \"Eksik mesajları üret\"e basın."
+            : lastJob.type !== "campaign.send" && "Kredi iade edildi."}
+        </Alert>
       )}
       {lastSend && (
         <Alert tone={lastSend.quotaReached ? "warning" : "success"} className="mb-6">
@@ -166,6 +171,44 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
       )}
 
       <div className="flex flex-col gap-6">
+        {/* Özet: sayılar ve gönderim uyarıları düğmelerin hemen altında */}
+        <Card>
+          <CardHeader title="Özet ve gönderim" description="Kampanya yönetici onayı olmadan gönderilemez. Onaydan sonra da her ileti tek tek kontrol edilir." />
+          <CardBody className="flex flex-col gap-5">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+              <Stat label="Lead" value={preview.totalLeads} />
+              <Stat label="Gönderilebilir" value={preview.sendable} />
+              <Stat label="İnceleme gerekli" value={preview.review} />
+              <Stat label="Gönderilmez" value={preview.doNotSend} sub={preview.suppressed ? `${preview.suppressed} engelli` : undefined} />
+              <Stat label="Yüksek puan (70+)" value={preview.highScore} />
+              <Stat label="Onaylı mesaj" value={preview.messages.APPROVED ?? 0} sub={[
+                  `${(preview.messages.SENT ?? 0) + (preview.messages.DELIVERED ?? 0)} gönderildi`,
+                  preview.messages.DELIVERED && `${preview.messages.DELIVERED} teslim edildi`,
+                  preview.messages.BOUNCED && `${preview.messages.BOUNCED} geri döndü`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              />
+            </div>
+
+            {!preview.emailConfigured && (
+              <Alert tone="warning">E-posta sağlayıcısı yapılandırılmamış (EMAIL_PROVIDER). Mesajları üretip onaylayabilirsiniz ama gönderim yapılamaz.</Alert>
+            )}
+            {preview.senderIssues.length > 0 && (
+              <Alert tone="warning">
+                <ul className="list-disc space-y-0.5 pl-4">{preview.senderIssues.map((s, i) => <li key={i}>{s}</li>)}</ul>
+                <Link href="/settings/email" className="mt-1 inline-block font-medium underline">E-posta ayarlarına git</Link>
+              </Alert>
+            )}
+
+            {campaign.approvedAt && (
+              <p className="text-xs text-text-3">
+                Onay: {new Intl.DateTimeFormat("tr-TR", { dateStyle: "medium", timeStyle: "short" }).format(campaign.approvedAt)}
+              </p>
+            )}
+          </CardBody>
+        </Card>
+
         {/* 1) Strateji */}
         <Card>
           <CardHeader
@@ -287,45 +330,6 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
             {messages.map((m) => (
               <MessageCard key={m.id} m={toMessageCard(m, m.lead.companyName, canApproveMsg)} />
             ))}
-          </CardBody>
-        </Card>
-
-        {/* 4) Önizleme, onay, gönderim */}
-        <Card>
-          <CardHeader title="4. Önizleme ve gönderim" description="Kampanya yönetici onayı olmadan gönderilemez. Onaydan sonra da her ileti tek tek kontrol edilir." />
-          <CardBody className="flex flex-col gap-5">
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-              <Stat label="Lead" value={preview.totalLeads} />
-              <Stat label="Gönderilebilir" value={preview.sendable} />
-              <Stat label="İnceleme gerekli" value={preview.review} />
-              <Stat label="Gönderilmez" value={preview.doNotSend} sub={preview.suppressed ? `${preview.suppressed} engelli` : undefined} />
-              <Stat label="Yüksek puan (70+)" value={preview.highScore} />
-              <Stat label="Onaylı mesaj" value={preview.messages.APPROVED ?? 0} sub={[
-                  `${(preview.messages.SENT ?? 0) + (preview.messages.DELIVERED ?? 0)} gönderildi`,
-                  preview.messages.DELIVERED && `${preview.messages.DELIVERED} teslim edildi`,
-                  preview.messages.BOUNCED && `${preview.messages.BOUNCED} geri döndü`,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              />
-            </div>
-
-            {!preview.emailConfigured && (
-              <Alert tone="warning">E-posta sağlayıcısı yapılandırılmamış (EMAIL_PROVIDER). Mesajları üretip onaylayabilirsiniz ama gönderim yapılamaz.</Alert>
-            )}
-            {preview.senderIssues.length > 0 && (
-              <Alert tone="warning">
-                <ul className="list-disc space-y-0.5 pl-4">{preview.senderIssues.map((s, i) => <li key={i}>{s}</li>)}</ul>
-                <Link href="/settings/email" className="mt-1 inline-block font-medium underline">E-posta ayarlarına git</Link>
-              </Alert>
-            )}
-
-            {hasQuickActions && <p className="text-xs text-text-3">Onay ve gönderim düğmeleri sayfanın üstündeki çubukta.</p>}
-            {campaign.approvedAt && (
-              <p className="text-xs text-text-3">
-                Onay: {new Intl.DateTimeFormat("tr-TR", { dateStyle: "medium", timeStyle: "short" }).format(campaign.approvedAt)}
-              </p>
-            )}
           </CardBody>
         </Card>
       </div>

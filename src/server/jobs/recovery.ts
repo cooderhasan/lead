@@ -3,7 +3,7 @@ import { rawDb } from "@/server/db";
 import { env } from "@/server/env";
 import type { JobType } from "./types";
 
-export const ORPHANED_JOB_MESSAGE = "Sunucu yeniden başlatıldığı için iş yarıda kaldı. İşlemi tekrar başlatın; harcanan kredi iade edildi.";
+export const ORPHANED_JOB_MESSAGE = "Sunucu yeniden başlatıldığı için iş yarıda kaldı. İşlemi tekrar başlatın; kullanılmayan kredi iade edildi.";
 
 /** Bu sürecin başladığı an (yeniden başlatma / deploy) */
 export const processStartedAt = () => new Date(Date.now() - process.uptime() * 1000);
