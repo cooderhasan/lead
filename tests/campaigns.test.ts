@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { rawDb } from "@/server/db";
-import { __setAIProviderForTests } from "@/server/ai";
+import { __setAIProviderForTests, __setRateLimitWaitsForTests } from "@/server/ai";
+import { AIProviderError } from "@/server/ai/types";
 import { __setEmailProviderForTests, checkSenderDomain } from "@/server/providers/email";
 import type { EmailProvider, OutgoingEmail } from "@/server/providers/email/types";
 import { drainInlineJobs } from "@/server/jobs/queue";
@@ -377,6 +378,45 @@ describe("kampanya akışı", () => {
     const q = await updateMessage(a, { id: msg.id, subject: "Basma yay tedariki", body: "Merhaba, pres hatlarında kullanılan basma yaylar üretiyoruz. Uygun görürseniz kataloğumuzu paylaşabilirim; kısa bir görüşme de planlayabiliriz. İyi çalışmalar dilerim." });
     expect(q.blocked).toBe(false);
     expect((await approveMessages(a, [msg.id])).approved).toBe(1);
+  });
+
+  it("AI istek sınırına (429) takılınca bekleyip aynı lead'i yeniden dener; sınır açılmazsa durur, kalanların kredisi iade edilir", async () => {
+    __setRateLimitWaitsForTests([0]);
+    try {
+      const a = await setupSeller();
+      for (const n of ["bir", "iki", "uc"]) await addLead(a.companyId, `Firma ${n}`, { genericEmail: `info@firma${n}.com` });
+      const before = await balance(a.companyId);
+      // Mesaj çağrıları: 1. lead başarılı; 2. lead önce 429 (3 deneme), beklemeden sonra başarılı; 3. lead hep 429
+      let msgCall = 0;
+      __setAIProviderForTests(
+        new MockAIProvider((input) => {
+          if (input.system?.includes("stratejist")) return strategyJson;
+          const k = msgCall++;
+          return k === 0 || k === 4 ? goodMessage : new AIProviderError("openai 429: rate limited", "openai", 429, true);
+        }),
+      );
+      const campaign = await createCampaign(a, { name: "Sınır", targetDescription: "Otomotiv yan sanayi firmalarına basma yay", productIds: [], minScore: 45 });
+      await startStrategyGeneration(a, campaign.id);
+      await drainInlineJobs();
+      await approveStrategy(a, campaign.id);
+      await startMessageGeneration(a, campaign.id);
+      await drainInlineJobs();
+
+      expect(await rawDb.message.count({ where: { campaignId: campaign.id } })).toBe(2);
+      const job = await rawDb.job.findFirstOrThrow({ where: { type: "campaign.generate_messages" } });
+      expect(job).toMatchObject({ status: "SUCCEEDED", result: expect.objectContaining({ created: 2, remaining: 1, rateLimited: true }) });
+      // 3 (strateji) + 2 mesaj; denenmeyen 3. lead'in kredisi iade edildi
+      expect(await balance(a.companyId)).toBe(before - 5);
+
+      // "Eksik mesajları üret" kaldığı yerden sürer: yalnızca mesajı olmayan lead için üretir
+      __setAIProviderForTests(new MockAIProvider(() => goodMessage));
+      const again = await startMessageGeneration(a, campaign.id);
+      expect(again.count).toBe(1);
+      await drainInlineJobs();
+      expect(await rawDb.message.count({ where: { campaignId: campaign.id } })).toBe(3);
+    } finally {
+      __setRateLimitWaitsForTests(null);
+    }
   });
 
   it("onaydan sonra ret gelen adrese gönderilmez; duraklatılan kampanya gönderimi durdurur", async () => {

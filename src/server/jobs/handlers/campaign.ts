@@ -20,8 +20,8 @@ export async function onCampaignStrategyFailure(payload: JobPayloads["campaign.s
 export const campaignMessagesJob: JobHandler<"campaign.generate_messages"> = async ({ campaignId, leadIds, usageId }, h) => {
   if (!h.companyId) throw new PermanentJobError("Şirket bağlamı yok.");
   const res = await generateCampaignMessages(h.companyId, campaignId, leadIds, h.progress);
-  // Üretilemeyen / atlanan mesajların kredisi iade edilir
-  const unused = (res.skipped + res.failed) * CREDIT_COSTS["ai.message"];
+  // Üretilemeyen / atlanan / istek sınırı yüzünden denenmeyen mesajların kredisi iade edilir
+  const unused = (res.skipped + res.failed + res.remaining) * CREDIT_COSTS["ai.message"];
   if (usageId && unused > 0) await refundCredits(usageId, "campaign.messages.partial", unused);
   await audit({ companyId: h.companyId, userId: h.createdById, actorType: "AI", action: "campaign.messages_generated", entityType: "Campaign", entityId: campaignId, metadata: res });
   return res;

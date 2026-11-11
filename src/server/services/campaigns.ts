@@ -4,7 +4,7 @@ import type { z } from "zod";
 import { tenantDb } from "@/server/tenancy/tenant-db";
 import { assertCan } from "@/server/tenancy/permissions";
 import type { TenantContext } from "@/server/tenancy/types";
-import { ai, isAIConfigured } from "@/server/ai";
+import { ai, aiBatchPacingMs, AIRateLimitError, isAIConfigured, retryOnRateLimit } from "@/server/ai";
 import { untrusted } from "@/server/ai/guardrails";
 import {
   CAMPAIGN_MESSAGE_INSTRUCTIONS,
@@ -492,11 +492,14 @@ export async function generateCampaignMessages(
   const { settings } = await getSenderSettings(companyId);
   const products = campaign.products.length ? campaign.products : verified.products;
 
+  const pacing = aiBatchPacingMs();
   let created = 0;
   let skipped = 0;
   let failed = 0;
+  let remaining = 0;
   for (let i = 0; i < leadIds.length; i++) {
     const leadId = leadIds[i]!;
+    if (i > 0 && pacing) await new Promise((r) => setTimeout(r, pacing));
     try {
       const { best } = await refreshLeadCompliance(companyId, leadId);
       if (!best || best.status === "DO_NOT_SEND") {
@@ -515,23 +518,25 @@ export async function generateCampaignMessages(
       const contact = best.contactId ? await db.leadContact.findUnique({ where: { id: best.contactId }, select: { fullName: true } }) : null;
       const leadData = leadPromptData(lead, contact?.fullName ?? null);
 
-      const { data } = await ai({ companyId, operation: "campaign.message" }).extract({
-        schema: campaignMessageSchema,
-        instructions: `${CAMPAIGN_MESSAGE_INSTRUCTIONS}
+      const { data } = await retryOnRateLimit(() =>
+        ai({ companyId, operation: "campaign.message" }).extract({
+          schema: campaignMessageSchema,
+          instructions: `${CAMPAIGN_MESSAGE_INSTRUCTIONS}
 
 ${languageInstruction(lang)}`,
-        shape: CAMPAIGN_MESSAGE_SHAPE,
-        input: [
-          `DOĞRULANMIŞ BİLGİ (satıcı):\n${JSON.stringify({ name: verified.name, summary: verified.summary, facts: verified.facts })}`,
-          `ÜRÜNLER:\n${JSON.stringify(products.slice(0, 15))}`,
-          `STRATEJİ:\n${JSON.stringify({ valueProposition: strategy.valueProposition, keyMessages: strategy.keyMessages, callToAction: strategy.callToAction, tone: strategy.tone })}`,
-          `ADIM TALİMATI: ${step.instruction ?? step.name}`,
-          `GÖNDEREN: ${settings?.fromName ?? verified.name}`,
-          `LEAD VERİSİ:\n${untrusted("lead-data", JSON.stringify(leadData), 8000)}`,
-        ].join("\n\n"),
-        tier: "default",
-        maxTokens: 1200,
-      });
+          shape: CAMPAIGN_MESSAGE_SHAPE,
+          input: [
+            `DOĞRULANMIŞ BİLGİ (satıcı):\n${JSON.stringify({ name: verified.name, summary: verified.summary, facts: verified.facts })}`,
+            `ÜRÜNLER:\n${JSON.stringify(products.slice(0, 15))}`,
+            `STRATEJİ:\n${JSON.stringify({ valueProposition: strategy.valueProposition, keyMessages: strategy.keyMessages, callToAction: strategy.callToAction, tone: strategy.tone })}`,
+            `ADIM TALİMATI: ${step.instruction ?? step.name}`,
+            `GÖNDEREN: ${settings?.fromName ?? verified.name}`,
+            `LEAD VERİSİ:\n${untrusted("lead-data", JSON.stringify(leadData), 8000)}`,
+          ].join("\n\n"),
+          tier: "default",
+          maxTokens: 1200,
+        }),
+      );
 
       const quality = checkMessageQuality({ subject: data.subject, body: data.body }, corpus, JSON.stringify(leadData));
       const notes: MessageQualityNotes = { issues: quality.issues, personalization: data.personalization, blocked: quality.blocked };
@@ -556,11 +561,16 @@ ${languageInstruction(lang)}`,
       created++;
     } catch (err) {
       if (err instanceof AppError && err.code === "AI_UNAVAILABLE" && created === 0) throw err;
+      // Beklemeye rağmen sınır açılmadı: kalan lead'ler denenmez (krediyi boşa harcamaz), "Eksik mesajları üret" kaldığı yerden sürer
+      if (err instanceof AIRateLimitError) {
+        remaining = leadIds.length - i;
+        break;
+      }
       failed++;
     }
     await progress?.(((i + 1) / leadIds.length) * 95);
   }
-  return { created, skipped, failed };
+  return { created, skipped, failed, remaining, rateLimited: remaining > 0 };
 }
 
 // ── Mesaj onayı / düzenleme ────────────────────────────────────────────

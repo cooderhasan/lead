@@ -72,6 +72,45 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
     .filter((m) => m.status === "PENDING_APPROVAL" && !((m.qualityNotes ?? {}) as { blocked?: boolean }).blocked && m.complianceStatus !== "DO_NOT_SEND")
     .map((m) => m.id);
   const lastSend = lastJob?.type === "campaign.send" && lastJob.status === "SUCCEEDED" ? (lastJob.result as { sent?: number; quotaReached?: boolean; remainingApproved?: number; skipped?: number } | null) : null;
+  const lastGenerate =
+    lastJob?.type === "campaign.generate_messages" && lastJob.status === "SUCCEEDED" ? (lastJob.result as { created?: number; remaining?: number; rateLimited?: boolean } | null) : null;
+
+  // Sık kullanılan işlemler sayfanın üstündeki sabit çubukta: mesaj listesi uzayınca aşağı inmek gerekmez
+  const approveAllButton = canApproveMsg && pendingIds.length > 1 && (
+    <ActionButton action={approveMessagesAction} fields={{ messageId: pendingIds, campaignId: campaign.id }} variant="secondary" confirm={`${pendingIds.length} mesajı okuduğunuzu ve onayladığınızı doğruluyor musunuz?`}>
+      <CheckCircle2 className="size-4" aria-hidden /> Sorunsuz {pendingIds.length} mesajı onayla
+    </ActionButton>
+  );
+  const generateButton = canWrite && verified && aiReady && !activeJob && editableStage && (
+    <ActionButton action={generateMessagesAction} fields={{ id: campaign.id }} variant={messages.length ? "secondary" : "primary"} pendingText="Başlatılıyor…">
+      <Wand2 className="size-4" aria-hidden /> {messages.length ? "Eksik mesajları üret" : "Mesajları üret"}
+    </ActionButton>
+  );
+  const approveCampaignButton = canApproveCampaign && ["DRAFT", "PAUSED"].includes(campaign.status) && !campaign.approvedAt && (
+    <ActionButton
+      action={approveCampaignAction}
+      fields={{ id: campaign.id }}
+      confirm={`Kampanyayı onaylıyor musunuz? ${preview.messages.APPROVED ?? 0} onaylı mesaj gönderime hazır olacak.`}
+    >
+      <CheckCircle2 className="size-4" aria-hidden /> Kampanyayı onayla
+    </ActionButton>
+  );
+  const sendButton = canSend && campaign.approvedAt && ["READY", "PAUSED"].includes(campaign.status) && preview.emailConfigured && (preview.messages.APPROVED ?? 0) > 0 && (
+    <ActionButton
+      action={startSendingAction}
+      fields={{ id: campaign.id }}
+      confirm={`${preview.messages.APPROVED} onaylı ileti gönderilecek (günlük sınır dahilinde). Devam edilsin mi?`}
+    >
+      <Send className="size-4" aria-hidden /> {campaign.status === "PAUSED" || campaign.startedAt ? "Gönderimi sürdür" : "Gönderimi başlat"}
+    </ActionButton>
+  );
+  const pauseButton = canSend && campaign.status === "RUNNING" && (
+    <form action={pauseCampaignAction}>
+      <input type="hidden" name="id" value={campaign.id} />
+      <Button type="submit" variant="secondary" size="sm"><Pause className="size-4" aria-hidden /> Duraklat</Button>
+    </form>
+  );
+  const hasQuickActions = Boolean(approveAllButton || generateButton || approveCampaignButton || sendButton || pauseButton);
 
   return (
     <>
@@ -96,6 +135,16 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
         }
       />
 
+      {hasQuickActions && (
+        <div className="sticky top-14 z-20 -mx-4 mb-6 flex flex-wrap items-start gap-2 border-b border-border bg-bg/85 px-4 py-3 backdrop-blur-md sm:-mx-6 sm:px-6">
+          {generateButton}
+          {approveAllButton}
+          {approveCampaignButton}
+          {sendButton}
+          {pauseButton}
+        </div>
+      )}
+
       {activeJob && (
         <div className="mb-6">
           <JobPoller jobId={activeJob.id} label={JOB_LABELS[activeJob.type] ?? "İşleniyor…"} />
@@ -108,6 +157,11 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
         <Alert tone={lastSend.quotaReached ? "warning" : "success"} className="mb-6">
           Son gönderim: {lastSend.sent ?? 0} ileti gönderildi{lastSend.skipped ? `, ${lastSend.skipped} atlandı (engel / uyum)` : ""}.
           {lastSend.quotaReached && ` Günlük gönderim sınırına ulaşıldı; kalan ${lastSend.remainingApproved} ileti için yarın "Gönderimi sürdür"e basın.`}
+        </Alert>
+      )}
+      {!activeJob && lastGenerate?.rateLimited && (
+        <Alert tone="warning" className="mb-6">
+          AI modelinin istek sınırı doldu: {lastGenerate.created ?? 0} mesaj yazıldı, {lastGenerate.remaining} lead kaldı (kredisi iade edildi). Birkaç dakika sonra &quot;Eksik mesajları üret&quot;e basın; kaldığı yerden devam eder.
         </Alert>
       )}
 
@@ -223,21 +277,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
         <Card>
           <CardHeader
             title={`3. Mesajlar (${messages.length})`}
-            description="Her mesaj ayrı onay ister. Doğrulanmamış iddia (fiyat, sertifika, rakam) içeren mesaj düzeltilmeden onaylanamaz."
-            action={
-              <div className="flex flex-wrap gap-2">
-                {canApproveMsg && pendingIds.length > 1 && (
-                  <ActionButton action={approveMessagesAction} fields={{ messageId: pendingIds, campaignId: campaign.id }} variant="secondary" confirm={`${pendingIds.length} mesajı okuduğunuzu ve onayladığınızı doğruluyor musunuz?`}>
-                    <CheckCircle2 className="size-4" aria-hidden /> Sorunsuz {pendingIds.length} mesajı onayla
-                  </ActionButton>
-                )}
-                {canWrite && verified && aiReady && !activeJob && editableStage && (
-                  <ActionButton action={generateMessagesAction} fields={{ id: campaign.id }} pendingText="Başlatılıyor…">
-                    <Wand2 className="size-4" aria-hidden /> {messages.length ? "Eksik mesajları üret" : "Mesajları üret"}
-                  </ActionButton>
-                )}
-              </div>
-            }
+            description="Her mesaj ayrı onay ister. Doğrulanmamış iddia (fiyat, sertifika, rakam) içeren mesaj düzeltilmeden onaylanamaz. Üretme ve toplu onay düğmeleri sayfanın üstünde."
           />
           <CardBody className="flex flex-col gap-3">
             {!verified && <p className="text-sm text-text-2">Mesajlar strateji onaylandıktan sonra üretilir (lead başına 1 kredi).</p>}
@@ -280,32 +320,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
               </Alert>
             )}
 
-            <div className="flex flex-wrap gap-3">
-              {canApproveCampaign && ["DRAFT", "PAUSED"].includes(campaign.status) && !campaign.approvedAt && (
-                <ActionButton
-                  action={approveCampaignAction}
-                  fields={{ id: campaign.id }}
-                  confirm={`Kampanyayı onaylıyor musunuz? ${preview.messages.APPROVED ?? 0} onaylı mesaj gönderime hazır olacak.`}
-                >
-                  <CheckCircle2 className="size-4" aria-hidden /> Kampanyayı onayla
-                </ActionButton>
-              )}
-              {canSend && campaign.approvedAt && ["READY", "PAUSED"].includes(campaign.status) && preview.emailConfigured && (preview.messages.APPROVED ?? 0) > 0 && (
-                <ActionButton
-                  action={startSendingAction}
-                  fields={{ id: campaign.id }}
-                  confirm={`${preview.messages.APPROVED} onaylı ileti gönderilecek (günlük sınır dahilinde). Devam edilsin mi?`}
-                >
-                  <Send className="size-4" aria-hidden /> {campaign.status === "PAUSED" || campaign.startedAt ? "Gönderimi sürdür" : "Gönderimi başlat"}
-                </ActionButton>
-              )}
-              {canSend && campaign.status === "RUNNING" && (
-                <form action={pauseCampaignAction}>
-                  <input type="hidden" name="id" value={campaign.id} />
-                  <Button type="submit" variant="secondary" size="sm"><Pause className="size-4" aria-hidden /> Duraklat</Button>
-                </form>
-              )}
-            </div>
+            {hasQuickActions && <p className="text-xs text-text-3">Onay ve gönderim düğmeleri sayfanın üstündeki çubukta.</p>}
             {campaign.approvedAt && (
               <p className="text-xs text-text-3">
                 Onay: {new Intl.DateTimeFormat("tr-TR", { dateStyle: "medium", timeStyle: "short" }).format(campaign.approvedAt)}

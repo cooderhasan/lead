@@ -87,6 +87,41 @@ export function isAIConfigured(): boolean {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Sağlayıcının istek sınırı (429) dolu: çağıran bir süre bekleyip aynı işi yeniden deneyebilir */
+export class AIRateLimitError extends AppError {
+  constructor(message: string) {
+    super("AI_UNAVAILABLE", message);
+    this.name = "AIRateLimitError";
+  }
+}
+
+/** Ücretsiz (":free") modellerde dakikada ~15 istek: OpenRouter'ın ücretsiz sınırının (dakikada 20) altında kalır */
+const FREE_MODEL_PACING_MS = 4000;
+const RATE_LIMIT_WAITS_MS = [20_000, 40_000, 60_000];
+let rateLimitWaits = RATE_LIMIT_WAITS_MS;
+
+export function __setRateLimitWaitsForTests(waits: number[] | null) {
+  rateLimitWaits = waits ?? RATE_LIMIT_WAITS_MS;
+}
+
+/** Toplu işlerde ardışık AI çağrıları arasında beklenecek süre (ücretli modellerde 0) */
+export function aiBatchPacingMs(): number {
+  if (providerOverride) return 0;
+  return /:free$/i.test(env().AI_MODEL ?? "") ? FREE_MODEL_PACING_MS : 0;
+}
+
+/** İstek sınırına takılan çağrıyı 20, 40, 60 sn bekleyerek yeniden dener; yine olmazsa AIRateLimitError fırlatır */
+export async function retryOnRateLimit<T>(fn: () => Promise<T>): Promise<T> {
+  for (let i = 0; ; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (!(err instanceof AIRateLimitError) || i >= rateLimitWaits.length) throw err;
+      await sleep(rateLimitWaits[i]!);
+    }
+  }
+}
+
 export interface AICallContext {
   /** Maliyet ve izolasyon için zorunlu. Platform işlemlerinde null. */
   companyId: string | null;
@@ -216,6 +251,7 @@ export class AIService {
     }
 
     console.error("[ai] tüm denemeler başarısız", this.ctx.operation, lastError);
+    if (lastError instanceof AIProviderError && lastError.status === 429) throw new AIRateLimitError(describeProviderError(lastError));
     throw new AppError("AI_UNAVAILABLE", describeProviderError(lastError));
   }
 
